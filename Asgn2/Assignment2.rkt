@@ -74,7 +74,7 @@
     [(IdC s) (cond
                [(symbol=? s for) what]
                [else in])]
-    [(AppC f args) (AppC f (map (lambda ([arg : ExprC]) (subst what for arg)) args))]
+    [(AppC f args) (AppC f (map (λ ([arg : ExprC]) (subst what for arg)) args))]
     [(PlusC l r) (PlusC (subst what for l)
                         (subst what for r))]
     [(MultC l r) (MultC (subst what for l)
@@ -85,6 +85,15 @@
               (PlusC (NumC 4) (NumC 1)))
 (check-equal? (subst (NumC 4) 'x (AppC 'func (list (IdC 'x) (MultC (IdC 'x) (IdC 'y)))))
               (AppC 'func (list (NumC 4) (MultC (NumC 4) (IdC 'y)))))
+
+;;calls subst for each argument in 'what', subsituting all of them into the 'in' ExprC
+(define (subst-args [args : (Listof ExprC)] [params : (Listof Symbol)] [in : ExprC]) : ExprC
+  (cond
+    [(empty? args) in]
+    [else (subst-args (rest args) (rest params) (subst (first args) (first params) in))]))
+
+(check-equal? (subst-args (list (NumC 4) (NumC 8)) '(x y) (PlusC (IdC 'x) (IdC 'y)))
+              (PlusC (NumC 4) (NumC 8)))
 
 ;-------------------------------------------------------------------------------------------
 ; get-fundef
@@ -109,33 +118,34 @@
 ; interp
 
 ;;evaluates an ExprC to a value
-#;(define (interp [a : ExprC] [fds : (Listof FunDefC)]) : Real
+(define (interp [a : ExprC] [fds : (Listof FunDefC)]) : Real
     (match a
       [(NumC n) n]
       [(PlusC l r) (+ (interp l fds) (interp r fds))]
       [(MultC  l r) (* (interp l fds) (interp r fds))]
-      [(AppC f a) (define fd (get-fundef f fds))
-                  (interp (subst (NumC (interp a fds))
-                                 (FunDefC-arg fd) (FunDefC-body fd)) fds)]))
+      [(AppC f args) (define fd (get-fundef f fds))
+                  (interp (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds)]))
 
-;(check-= (interp (PlusC (NumC 4) (NumC 5)) '()) 9 EPSILON)
-;(check-= (interp (MultC (NumC 4) (NumC 5)) '()) 20 EPSILON)
-;(check-= (interp (PlusC (MultC (NumC 3) (NumC 2)) (NumC 5)) '()) 11 EPSILON)
-#;(check-= (interp (AppC 'func (NumC 3))
-                 (list (FunDefC 'func 'x (PlusC (IdC 'x) (NumC 1)))))
-          4 EPSILON)
+;(NumC (interp a fds))
+
+(check-= (interp (PlusC (NumC 4) (NumC 5)) '()) 9 EPSILON)
+(check-= (interp (MultC (NumC 4) (NumC 5)) '()) 20 EPSILON)
+(check-= (interp (PlusC (MultC (NumC 3) (NumC 2)) (NumC 5)) '()) 11 EPSILON)
+(check-= (interp (AppC 'func (list (NumC 10) (NumC 5)))
+                 (list (FunDefC 'func '(x y) (PlusC (IdC 'x) (IdC 'y)))))
+          15 EPSILON)
 
 
 ;-------------------------------------------------------------------------------------------
 ; top-interp
 
 ;;interperates an S-expression
-#;(define (top-interp [s : Sexp]) : Real
+(define (top-interp [s : Sexp]) : Real
   (interp (parse s) '()))
 
-;(check-equal? (top-interp '{+ 2 3}) 5)
-;(check-equal? (top-interp '{* 2 {- {- {- 5 2}}}}) 6)
-;(check-equal? (top-interp '{+ {* 4 {- 2}} {- 10 5}}) -3)
+(check-equal? (top-interp '{+ 2 3}) 5)
+(check-equal? (top-interp '{* 2 {- {- {- 5 2}}}}) 6)
+(check-equal? (top-interp '{+ {* 4 {- 2}} {- 10 5}}) -3)
 
 
 
