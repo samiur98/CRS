@@ -5,18 +5,25 @@
 (define EPSILON 1e-05)
 
 ;-------------------------------------------------------------------------------------------
-; ArithC
+; Data Definitions:
+;   ExprC, FunDefC
 
-(define-type ExprC (U NumC PlusC MultC))
+(define-type ExprC (U NumC PlusC MultC IdC))
 (struct NumC ([n : Real]) #:transparent)
 (struct PlusC ([l : ExprC] [r : ExprC]) #:transparent)
 (struct MultC ([l : ExprC] [r : ExprC]) #:transparent)
+(struct IdC ([s : Symbol]) #:transparent)
+
 (struct FunDefC ([name : Symbol] [arg : Symbol] [body : ExprC]) #:transparent)
+
+;-------------------------------------------------------------------------------------------
+; Parse Functions
 
 ;;maps an s-expression directly to an ExprC
 (define (parse [s : Sexp]) : ExprC
   (match s
     [(? real? a) (NumC a)]
+    [(? symbol? id) (IdC id)]
     [(list '+ a b) (PlusC (parse a) (parse b))]
     [(list '* a b) (MultC (parse a) (parse b))]
     [(list '- a b) (PlusC (parse a) (MultC (NumC -1)(parse b)))]
@@ -31,6 +38,12 @@
               (PlusC (NumC 1) (MultC (NumC -1) (PlusC (NumC 5) (NumC 6)))))
 (check-exn (regexp (regexp-quote "invalid input"))
            (lambda () (parse "hello")))
+
+;;parses a function definition, in an s-expression, into a FunDefC
+(define (parse-fundef [s : Sexp]) : FunDefC
+  (match s
+    [(list (? symbol? name) (? symbol? arg) (? list? body))
+     (FunDefC name arg (parse body))]))
 
 ;-------------------------------------------------------------------------------------------
 ; interp
