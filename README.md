@@ -9,7 +9,7 @@ BUT, Racket treats these exactly the same, so '(+ 4 (- 10 5)) equals '{+ 4 {- 10
 
 
 TODO Tasks:
- 1. Convert to using a single "BinaryOperation" struct instead of separate Plus, Mult, etc. structs
+ 1. Convert to using a single ("BinaryOperation" -Rohan) struct instead of separate Plus, Mult, etc. structs
  	Do this in ExprC struct
  	Modify parse to create binop structs instead of plus, mult, etc.
  	Modify interpreter to evaluate binop structs
