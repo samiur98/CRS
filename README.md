@@ -13,10 +13,12 @@ TODO Tasks:
  	Do this in both ArithC and ArithS
  	Modify parse to create binop structs instead of plus, mult, etc.
  	Modify interpreter to evaluate binop structs
+
  2. Add an "if statement", called ifleq0, to the ExprC struct, and 
  	modify the parser to accept ifleq0 s-expression and return ifleq0 structs, and 
  	modify the interpreter to evaluate ifleq0 structs
- 3. Functions
+ 	
+ 3. (I'll start with this part - Connor)Functions
  	create required data structures for functions
  	modify parser to read in funcdef s-expressions and return fundefC struct
  	modify intpreter to evaluate fundefC structs
