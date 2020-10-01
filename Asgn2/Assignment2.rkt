@@ -7,57 +7,36 @@
 ;-------------------------------------------------------------------------------------------
 ; ArithC
 
-(define-type ArithC (U NumC PlusC MultC))
+(define-type ExprC (U NumC PlusC MultC))
 (struct NumC ([n : Real]) #:transparent)
-(struct PlusC ([l : ArithC] [r : ArithC]) #:transparent)
-(struct MultC ([l : ArithC] [r : ArithC]) #:transparent)
+(struct PlusC ([l : ExprC] [r : ExprC]) #:transparent)
+(struct MultC ([l : ExprC] [r : ExprC]) #:transparent)
+(struct FunDefC ([name : Symbol] [arg : Symbol] [body : ExprC]) #:transparent)
 
-(define-type ArithS (U NumS PlusS MinusS MultS UnaryS))
-  (struct NumS ([n : Real]) #:transparent)
-  (struct PlusS ([l : ArithS] [r : ArithS]) #:transparent)
-  (struct MinusS ([l : ArithS] [r : ArithS]) #:transparent)
-  (struct MultS ([l : ArithS] [r : ArithS]) #:transparent)
-  (struct UnaryS ([e : ArithS]) #:transparent)
-
-;;parses an S-exp and produces a corresponding ArithS
-(define (parse1 [s : Sexp]) : ArithS
+;;maps an s-expression directly to an ExprC
+(define (parse [s : Sexp]) : ExprC
   (match s
-    [(? real? a) (NumS s)]
-    [(list '+ a b) (PlusS (parse1 a) (parse1 b))]
-    [(list '* a b) (MultS (parse1 a) (parse1 b))]
-    [(list '- a b) (MinusS (parse1 a) (parse1 b))]
-    [(list '- a) (UnaryS (parse1 a))]
-    [else (error 'parse1 "invalid input")]))
+    [(? real? a) (NumC a)]
+    [(list '+ a b) (PlusC (parse a) (parse b))]
+    [(list '* a b) (MultC (parse a) (parse b))]
+    [(list '- a b) (PlusC (parse a) (MultC (NumC -1)(parse b)))]
+    [(list '- a) (MultC (NumC -1) (parse a))]
+    [else (error 'parse "invalid input")]))
 
-(check-equal? (parse1 '{+ 1 2}) (PlusS (NumS 1) (NumS 2)))
-(check-equal? (parse1 '{+ 1 {- 2}}) (PlusS (NumS 1) (UnaryS (NumS 2))))
-(check-equal? (parse1 '{+ {* 3 6} {- 10 2}}) (PlusS (MultS (NumS 3) (NumS 6))
-                                                    (MinusS (NumS 10) (NumS 2))))
-(check-exn (regexp (regexp-quote "invalid input"))
-           (lambda () (parse1 "hello")))
-
-
-;;desugars and ArithS into an ArithC
-(define (desugar [as : ArithS]) : ArithC
-    (match as
-      [(NumS n) (NumC n)]
-      [(PlusS l r) (PlusC (desugar l) (desugar r))]
-      [(MultS l r) (MultC (desugar l) (desugar r))]
-      [(UnaryS e) (MultC (NumC -1) (desugar e))]
-      [(MinusS l r) (PlusC (desugar l)(MultC (NumC -1)(desugar r)))]))
-
-(check-equal? (desugar (PlusS (NumS 1) (NumS 2)))
+(check-equal? (parse '(+ 1 2))
               (PlusC (NumC 1) (NumC 2)))
-(check-equal? (desugar (MultS (UnaryS (NumS 1)) (NumS 2)))
+(check-equal? (parse '(* (- 1) 2))
               (MultC (MultC (NumC -1) (NumC 1)) (NumC 2)))
-(check-equal? (desugar (MinusS (NumS 1) (PlusS (NumS 5) (NumS 6))))
+(check-equal? (parse '(- 1 (+ 5 6)))
               (PlusC (NumC 1) (MultC (NumC -1) (PlusC (NumC 5) (NumC 6)))))
+(check-exn (regexp (regexp-quote "invalid input"))
+           (lambda () (parse "hello")))
 
 ;-------------------------------------------------------------------------------------------
 ; interp
 
-;;evaluates an ArithC to a value
-(define (interp [a : ArithC]) : Real
+;;evaluates an ExprC to a value
+(define (interp [a : ExprC]) : Real
     (match a
       [(NumC n) n]
       [(PlusC l r) (+ (interp l) (interp r))]
@@ -73,7 +52,7 @@
 
 ;;interperates an S-expression
 (define (top-interp [s : Sexp]) : Real
-  (interp (desugar (parse1 s))))
+  (interp (parse s)))
 
 (check-equal? (top-interp '{+ 2 3}) 5)
 (check-equal? (top-interp '{* 2 {- {- {- 5 2}}}}) 6)
