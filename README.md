@@ -12,7 +12,6 @@ TODO Tasks:
  1. Convert to using a single "BinaryOperation" struct instead of separate Plus, Mult, etc. structs
  	Do this in both ArithC and ArithS
  	Modify parse to create binop structs instead of plus, mult, etc.
- 	Modify desugar to work with binop structs instead of plus, mult, etc.
  	Modify interpreter to evaluate binop structs
  2. Add an "if statement", called ifleq0, to the ExprC struct, and 
  	modify the parser to accept ifleq0 s-expression and return ifleq0 structs, and 

@@ -29,9 +29,9 @@
     [(list '- a) (UnaryS (parse1 a))]
     [else (error 'parse1 "invalid input")]))
 
-(check-equal? (parse1 '(+ 1 2)) (PlusS (NumS 1) (NumS 2)))
-(check-equal? (parse1 '(+ 1 (- 2))) (PlusS (NumS 1) (UnaryS (NumS 2))))
-(check-equal? (parse1 '(+ (* 3 6) (- 10 2))) (PlusS (MultS (NumS 3) (NumS 6))
+(check-equal? (parse1 '{+ 1 2}) (PlusS (NumS 1) (NumS 2)))
+(check-equal? (parse1 '{+ 1 {- 2}}) (PlusS (NumS 1) (UnaryS (NumS 2))))
+(check-equal? (parse1 '{+ {* 3 6} {- 10 2}}) (PlusS (MultS (NumS 3) (NumS 6))
                                                     (MinusS (NumS 10) (NumS 2))))
 (check-exn (regexp (regexp-quote "invalid input"))
            (lambda () (parse1 "hello")))
@@ -75,9 +75,9 @@
 (define (top-interp [s : Sexp]) : Real
   (interp (desugar (parse1 s))))
 
-(check-equal? (top-interp '(+ 2 3)) 5)
-(check-equal? (top-interp '(* 2 (- (- (- 5 2))))) 6)
-(check-equal? (top-interp '(+ (* 4 (- 2)) (- 10 5))) -3)
+(check-equal? (top-interp '{+ 2 3}) 5)
+(check-equal? (top-interp '{* 2 {- {- {- 5 2}}}}) 6)
+(check-equal? (top-interp '{+ {* 4 {- 2}} {- 10 5}}) -3)
 
 
 
