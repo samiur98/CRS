@@ -28,22 +28,30 @@
     [(list '* a b) (MultC (parse a) (parse b))]
     [(list '- a b) (PlusC (parse a) (MultC (NumC -1)(parse b)))]
     [(list '- a) (MultC (NumC -1) (parse a))]
-    [else (error 'parse "invalid input")]))
+    [else (error 'parse "invalid input to parse")]))
 
 (check-equal? (parse '(+ 1 2))
               (PlusC (NumC 1) (NumC 2)))
+(check-equal? (parse '(+ 1 var))
+              (PlusC (NumC 1) (IdC 'var)))
 (check-equal? (parse '(* (- 1) 2))
               (MultC (MultC (NumC -1) (NumC 1)) (NumC 2)))
 (check-equal? (parse '(- 1 (+ 5 6)))
               (PlusC (NumC 1) (MultC (NumC -1) (PlusC (NumC 5) (NumC 6)))))
-(check-exn (regexp (regexp-quote "invalid input"))
+(check-exn (regexp (regexp-quote "invalid input to parse"))
            (lambda () (parse "hello")))
 
 ;;parses a function definition, in an s-expression, into a FunDefC
 (define (parse-fundef [s : Sexp]) : FunDefC
   (match s
     [(list (? symbol? name) (? symbol? arg) (? list? body))
-     (FunDefC name arg (parse body))]))
+     (FunDefC name arg (parse body))]
+    [else (error 'parse "invalid input to parse-fundef")]))
+
+(check-equal? (parse-fundef '(myfunc x (+ 1 x)))
+              (FunDefC 'myfunc 'x (PlusC (NumC 1) (IdC 'x))))
+(check-exn (regexp (regexp-quote "invalid input to parse-fundef"))
+           (lambda () (parse-fundef '(+ 1 4))))
 
 ;-------------------------------------------------------------------------------------------
 ; interp
