@@ -174,7 +174,6 @@
 (check-equal? (top-interp '{{fn {u x} {- x}}
                             {fn {f x y} {* x y}}
                             {fn {main} {+ {f 6 4} {u 4}}}})20)
-
 (check-equal? (top-interp '{{fn {u x} {- x}}
                             {fn {f x y} {* x y}}
                             {fn {main} {+ {f 6 4} {u {- 6}}}}})30)
