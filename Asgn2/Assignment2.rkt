@@ -8,19 +8,17 @@
 ; Data Definitions:
 ;   ExprC, FunDefC
 
-(define-type ExprC (U NumC PlusC MultC IdC AppC BinOp))
+(define-type ExprC (U NumC IdC AppC BinOp))
 (struct NumC ([n : Real]) #:transparent)
-(struct PlusC ([l : ExprC] [r : ExprC]) #:transparent)
-(struct MultC ([l : ExprC] [r : ExprC]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : Symbol] [args : (Listof ExprC)]) #:transparent)
-
 (struct BinOp ([l : ExprC] [r : ExprC] [operator : Symbol])#:transparent)
 
 (struct FunDefC ([name : Symbol] [args : (Listof Symbol)] [body : ExprC]) #:transparent)
 
 ;-------------------------------------------------------------------------------------------
 ; Parse
+;Parse mod is the new parse
 
 (define (parse-mod [s : Sexp]) : ExprC
   (match s
@@ -39,22 +37,7 @@
 (check-equal? (parse-mod '{- 9}) (BinOp (NumC -1) (NumC 9) '*))
 
 
-
-
-
 ;;maps an s-expression directly to an ExprC
-(define (parse [s : Sexp]) : ExprC
-  (match s
-    [(? real? a) (NumC a)]
-    [(? symbol? id) (IdC id)]
-    [(list '+ a b) (PlusC (parse a) (parse b))]
-    [(list '* a b) (MultC (parse a) (parse b))]
-    [(list '- a b) (PlusC (parse a) (MultC (NumC -1)(parse b)))]
-    [(list '- a) (MultC (NumC -1) (parse a))]
-    [(list (? symbol? n) args ...)
-     (AppC n (map parse (cast args (Listof Sexp))))]
-    [else (error 'parse "invalid input to parse")]))
-
 (check-equal? (parse-mod '{+ 1 2})
               (BinOp (NumC 1) (NumC 2) '+))
 (check-equal? (parse-mod '{+ 1 var})
@@ -68,17 +51,17 @@
 (check-equal? (parse-mod '{func})
               (AppC 'func '()))
 (check-exn (regexp (regexp-quote "invalid input to parse"))
-           (lambda () (parse "hello")))
+           (lambda () (parse-mod "hello")))
 
 ;;parses a function definition, from an s-expression, into a FunDefC
 (define (parse-fundef [s : Sexp]) : FunDefC
   (match s
     [(list 'fn (list (? symbol? name) (? symbol? args) ...) body)
-     (FunDefC name (cast args (Listof Symbol)) (parse body))]
+     (FunDefC name (cast args (Listof Symbol)) (parse-mod body))]
     [else (error 'parse-fundef "invalid input to parse-fundef")]))
 
 (check-equal? (parse-fundef '{fn {myfunc x y z} {+ 1 x}})
-              (FunDefC 'myfunc '(x y z) (PlusC (NumC 1) (IdC 'x))))
+              (FunDefC 'myfunc '(x y z) (BinOp (NumC 1) (IdC 'x) '+)))
 (check-equal? (parse-fundef '{fn {myfunc} 2})
               (FunDefC 'myfunc '() (NumC 2)))
 (check-exn (regexp (regexp-quote "invalid input to parse-fundef"))
@@ -91,13 +74,12 @@
 
 (check-equal? (parse-prog '{})'())
 (check-equal? (parse-prog '{{fn {myfunc x y z} {+ 1 x}}})
-              (list (FunDefC 'myfunc '(x y z) (PlusC (NumC 1) (IdC 'x)))))
+              (list (FunDefC 'myfunc '(x y z) (BinOp (NumC 1) (IdC 'x) '+))))
 (check-equal? (parse-prog '{{fn {myfunc1 x y z} {+ 1 x}}
                             {fn {myfunc2} 1}})
-              (list (FunDefC 'myfunc1 '(x y z) (PlusC (NumC 1) (IdC 'x)))
+              (list (FunDefC 'myfunc1 '(x y z) (BinOp (NumC 1) (IdC 'x) '+))
                     (FunDefC 'myfunc2 '() (NumC 1))))
 
-;-------------------------------------------------------------------------------------------
 ; substitute
 
 ;;substitutes an expression for a symbol in another expression
@@ -108,16 +90,18 @@
                [(symbol=? s for) what]
                [else in])]
     [(AppC f args) (AppC f (map (λ ([arg : ExprC]) (subst what for arg)) args))]
-    [(PlusC l r) (PlusC (subst what for l)
-                        (subst what for r))]
-    [(MultC l r) (MultC (subst what for l)
-                        (subst what for r))]))
+    [(BinOp l r '+) (BinOp (subst what for l)
+                        (subst what for r) '+)]
+    [(BinOp l r '*) (BinOp (subst what for l)
+                        (subst what for r) '*)]))
 
 
-(check-equal? (subst (NumC 4) 'x (PlusC (IdC 'x) (NumC 1)))
-              (PlusC (NumC 4) (NumC 1)))
-(check-equal? (subst (NumC 4) 'x (AppC 'func (list (IdC 'x) (MultC (IdC 'x) (IdC 'y)))))
-              (AppC 'func (list (NumC 4) (MultC (NumC 4) (IdC 'y)))))
+(check-equal? (subst (NumC 4) 'x (BinOp (IdC 'x) (NumC 1) '+))
+              (BinOp (NumC 4) (NumC 1) '+))
+
+(check-equal? (subst (NumC 4) 'x (AppC 'func (list (IdC 'x) (BinOp (IdC 'x) (IdC 'y) '*))))
+              (AppC 'func (list (NumC 4) (BinOp (NumC 4) (IdC 'y) '*))))
+
 
 ;;calls subst for each argument in 'what', handling multi-arg functions
 (define (subst-args [args : (Listof ExprC)] [params : (Listof Symbol)] [in : ExprC]) : ExprC
@@ -125,11 +109,9 @@
     [(empty? args) in]
     [else (subst-args (rest args) (rest params) (subst (first args) (first params) in))]))
 
-(check-equal? (subst-args (list (NumC 4) (NumC 8)) '(x y) (PlusC (IdC 'x) (IdC 'y)))
-              (PlusC (NumC 4) (NumC 8)))
+(check-equal? (subst-args (list (NumC 4) (NumC 8)) '(x y) (BinOp (IdC 'x) (IdC 'y) '+))
+              (BinOp (NumC 4) (NumC 8) '+))
 
-;-------------------------------------------------------------------------------------------
-; get-fundef
 
 ;;gets a function definition from a list of FunDefC's, given its name
 (define (get-fundef [n : Symbol] [fds : (Listof FunDefC)]) : FunDefC
@@ -147,24 +129,22 @@
 (check-exn (regexp (regexp-quote "get-fundef: reference to undefined function"))
            (lambda () (get-fundef 'func '())))
 
-;-------------------------------------------------------------------------------------------
+
 ; interp
-
-
 ;;evaluates an ExprC to a value
 (define (interp [a : ExprC] [fds : (Listof FunDefC)]) : Real
     (match a
       [(NumC n) n]
-      [(PlusC l r) (+ (interp l fds) (interp r fds))]
-      [(MultC  l r) (* (interp l fds) (interp r fds))]
+      [(BinOp l r '+) (+ (interp l fds) (interp r fds))]
+      [(BinOp  l r '*) (* (interp l fds) (interp r fds))]
       [(AppC f args) (define fd (get-fundef f fds))
                   (interp (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds)]))
 
-(check-= (interp (PlusC (NumC 4) (NumC 5)) '()) 9 EPSILON)
-(check-= (interp (MultC (NumC 4) (NumC 5)) '()) 20 EPSILON)
-(check-= (interp (PlusC (MultC (NumC 3) (NumC 2)) (NumC 5)) '()) 11 EPSILON)
+(check-= (interp (BinOp (NumC 4) (NumC 5) '+) '()) 9 EPSILON)
+(check-= (interp (BinOp (NumC 4) (NumC 5) '*) '()) 20 EPSILON)
+(check-= (interp (BinOp (BinOp (NumC 3) (NumC 2) '*) (NumC 5) '+) '()) 11 EPSILON)
 (check-= (interp (AppC 'func (list (NumC 10) (NumC 5)))
-                 (list (FunDefC 'func '(x y) (PlusC (IdC 'x) (IdC 'y)))))
+                 (list (FunDefC 'func '(x y) (BinOp (IdC 'x) (IdC 'y) '+))))
           15 EPSILON)
 
 
@@ -181,8 +161,6 @@
         (parse-prog '{{fn {f} 5}
                       {fn {main} {+ {f} {f}}}}))10)
 
-;-------------------------------------------------------------------------------------------
-; top-interp
 
 ;;interperates an S-expression
 (define (top-interp [fun-sexps : Sexp]) : Real
