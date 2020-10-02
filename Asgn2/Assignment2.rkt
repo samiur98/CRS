@@ -8,17 +8,39 @@
 ; Data Definitions:
 ;   ExprC, FunDefC
 
-(define-type ExprC (U NumC PlusC MultC IdC AppC))
+(define-type ExprC (U NumC PlusC MultC IdC AppC BinOp))
 (struct NumC ([n : Real]) #:transparent)
 (struct PlusC ([l : ExprC] [r : ExprC]) #:transparent)
 (struct MultC ([l : ExprC] [r : ExprC]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : Symbol] [args : (Listof ExprC)]) #:transparent)
 
+(struct BinOp ([l : ExprC] [r : ExprC] [operator : Symbol])#:transparent)
+
 (struct FunDefC ([name : Symbol] [args : (Listof Symbol)] [body : ExprC]) #:transparent)
 
 ;-------------------------------------------------------------------------------------------
 ; Parse
+
+(define (parse-mod [s : Sexp]) : ExprC
+  (match s
+    [(? real? a) (NumC a)]
+    [(? symbol? id) (IdC id)]
+    [(list '* a b) (BinOp (parse-mod a) (parse-mod b) '*)]
+    [(list '+ a b) (BinOp (parse-mod a) (parse-mod b) '+)]
+    [(list '- a b) (BinOp (parse-mod a) (BinOp (parse-mod -1) (parse-mod b) '*) '+)]
+    [(list '- a) (BinOp (parse-mod -1) (parse-mod a) '*)]
+    [(list (? symbol? n) args ...) (AppC n (map parse-mod (cast args (Listof Sexp))))]
+    [else (error 'parse-mod "invalid input to parse")]))
+
+(check-equal? (parse-mod '{+ 1 2}) (BinOp (NumC 1) (NumC 2) '+))
+(check-equal? (parse-mod '{* 1 2}) (BinOp (NumC 1) (NumC 2) '*))
+(check-equal? (parse-mod '{- 5 2}) (BinOp (NumC 5) (BinOp (NumC -1) (NumC 2) '*) '+))
+(check-equal? (parse-mod '{- 9}) (BinOp (NumC -1) (NumC 9) '*))
+
+
+
+
 
 ;;maps an s-expression directly to an ExprC
 (define (parse [s : Sexp]) : ExprC
@@ -33,17 +55,17 @@
      (AppC n (map parse (cast args (Listof Sexp))))]
     [else (error 'parse "invalid input to parse")]))
 
-(check-equal? (parse '{+ 1 2})
-              (PlusC (NumC 1) (NumC 2)))
-(check-equal? (parse '{+ 1 var})
-              (PlusC (NumC 1) (IdC 'var)))
-(check-equal? (parse '{* {- 1} 2})
-              (MultC (MultC (NumC -1) (NumC 1)) (NumC 2)))
-(check-equal? (parse '{- 1 {+ 5 6}})
-              (PlusC (NumC 1) (MultC (NumC -1) (PlusC (NumC 5) (NumC 6)))))
-(check-equal? (parse '{func {+ 1 5}})
-              (AppC 'func (list(PlusC (NumC 1) (NumC 5)))))
-(check-equal? (parse '{func})
+(check-equal? (parse-mod '{+ 1 2})
+              (BinOp (NumC 1) (NumC 2) '+))
+(check-equal? (parse-mod '{+ 1 var})
+              (BinOp (NumC 1) (IdC 'var) '+))
+(check-equal? (parse-mod '{* {- 1} 2})
+              (BinOp (BinOp (NumC -1) (NumC 1) '*) (NumC 2) '*))
+(check-equal? (parse-mod '{- 1 {+ 5 6}})
+              (BinOp (NumC 1) (BinOp (NumC -1) (BinOp (NumC 5) (NumC 6) '+) '*) '+))
+(check-equal? (parse-mod '{func {+ 1 5}})
+              (AppC 'func (list(BinOp (NumC 1) (NumC 5) '+))))
+(check-equal? (parse-mod '{func})
               (AppC 'func '()))
 (check-exn (regexp (regexp-quote "invalid input to parse"))
            (lambda () (parse "hello")))
@@ -178,12 +200,3 @@
 (check-equal? (top-interp '{{fn {u x} {- x}}
                             {fn {f x y} {* x y}}
                             {fn {main} {+ {f 6 4} {u {- 6}}}}})30)
-
-
-
-
-
-
-
-
-
