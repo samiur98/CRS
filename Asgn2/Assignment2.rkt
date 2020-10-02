@@ -13,12 +13,14 @@
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : Symbol] [args : (Listof ExprC)]) #:transparent)
 (struct BinOp ([l : ExprC] [r : ExprC] [operator : Symbol])#:transparent)
+;BinOp new struct which replaces the PlusC and MultC
 
 (struct FunDefC ([name : Symbol] [args : (Listof Symbol)] [body : ExprC]) #:transparent)
 
 ;-------------------------------------------------------------------------------------------
 ; Parse
 ;Parse mod is the new parse
+;
 
 (define (parse-mod [s : Sexp]) : ExprC
   (match s
@@ -174,6 +176,7 @@
 (check-equal? (top-interp '{{fn {u x} {- x}}
                             {fn {f x y} {* x y}}
                             {fn {main} {+ {f 6 4} {u 4}}}})20)
+
 (check-equal? (top-interp '{{fn {u x} {- x}}
                             {fn {f x y} {* x y}}
                             {fn {main} {+ {f 6 4} {u {- 6}}}}})30)
