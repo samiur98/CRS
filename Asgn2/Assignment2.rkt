@@ -53,16 +53,27 @@
   (match s
     [(list 'fn (list (? symbol? name) (? symbol? args) ...) body)
      (FunDefC name (cast args (Listof Symbol)) (parse body))]
-    [else (error 'parse "invalid input to parse-fundef")]))
+    [else (error 'parse-fundef "invalid input to parse-fundef")]))
 
-; test - multiple args
 (check-equal? (parse-fundef '{fn {myfunc x y z} {+ 1 x}})
               (FunDefC 'myfunc '(x y z) (PlusC (NumC 1) (IdC 'x))))
-; test - zero args
 (check-equal? (parse-fundef '{fn {myfunc} 2})
               (FunDefC 'myfunc '() (NumC 2)))
 (check-exn (regexp (regexp-quote "invalid input to parse-fundef"))
            (lambda () (parse-fundef '(+ 1 4))))
+
+;;parses a list a functions, given as an s-expression
+(define (parse-prog [s : Sexp]) : (Listof FunDefC)
+  (match s
+    [(list funs ...) (map parse-fundef funs)]))
+
+(check-equal? (parse-prog '{})'())
+(check-equal? (parse-prog '{{fn {myfunc x y z} {+ 1 x}}})
+              (list (FunDefC 'myfunc '(x y z) (PlusC (NumC 1) (IdC 'x)))))
+(check-equal? (parse-prog '{{fn {myfunc1 x y z} {+ 1 x}}
+                            {fn {myfunc2} 1}})
+              (list (FunDefC 'myfunc1 '(x y z) (PlusC (NumC 1) (IdC 'x)))
+                    (FunDefC 'myfunc2 '() (NumC 1))))
 
 ;-------------------------------------------------------------------------------------------
 ; substitute
@@ -86,7 +97,7 @@
 (check-equal? (subst (NumC 4) 'x (AppC 'func (list (IdC 'x) (MultC (IdC 'x) (IdC 'y)))))
               (AppC 'func (list (NumC 4) (MultC (NumC 4) (IdC 'y)))))
 
-;;calls subst for each argument in 'what', subsituting all of them into the 'in' ExprC
+;;calls subst for each argument in 'what', handling multi-arg functions
 (define (subst-args [args : (Listof ExprC)] [params : (Listof Symbol)] [in : ExprC]) : ExprC
   (cond
     [(empty? args) in]
@@ -117,6 +128,7 @@
 ;-------------------------------------------------------------------------------------------
 ; interp
 
+
 ;;evaluates an ExprC to a value
 (define (interp [a : ExprC] [fds : (Listof FunDefC)]) : Real
     (match a
@@ -126,8 +138,6 @@
       [(AppC f args) (define fd (get-fundef f fds))
                   (interp (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds)]))
 
-;(NumC (interp a fds))
-
 (check-= (interp (PlusC (NumC 4) (NumC 5)) '()) 9 EPSILON)
 (check-= (interp (MultC (NumC 4) (NumC 5)) '()) 20 EPSILON)
 (check-= (interp (PlusC (MultC (NumC 3) (NumC 2)) (NumC 5)) '()) 11 EPSILON)
@@ -136,16 +146,38 @@
           15 EPSILON)
 
 
+;;intreprets the 'main' function, given a list of functions
+(define (interp-fns [funs : (Listof FunDefC)]) : Real
+  (interp (FunDefC-body (get-fundef 'main funs)) funs))
+
+(check-equal? (interp-fns
+               (list (FunDefC 'func '(x) (NumC 4)) (FunDefC 'main '(x) (NumC 5))))5)
+(check-equal? (interp-fns
+       (parse-prog '{{fn {f x y} {+ x y}}
+                     {fn {main} {f 1 2}}})) 3)
+(check-equal? (interp-fns
+        (parse-prog '{{fn {f} 5}
+                      {fn {main} {+ {f} {f}}}}))10)
+
 ;-------------------------------------------------------------------------------------------
 ; top-interp
 
 ;;interperates an S-expression
-(define (top-interp [s : Sexp]) : Real
-  (interp (parse s) '()))
+(define (top-interp [fun-sexps : Sexp]) : Real
+  (interp-fns (parse-prog fun-sexps)))
 
-(check-equal? (top-interp '{+ 2 3}) 5)
-(check-equal? (top-interp '{* 2 {- {- {- 5 2}}}}) 6)
-(check-equal? (top-interp '{+ {* 4 {- 2}} {- 10 5}}) -3)
+
+(check-equal? (top-interp '{{fn {f x y} {+ x y}}
+                            {fn {main} {f 1 2}}}) 3)
+(check-equal? (top-interp '{{fn {f} 5}
+                            {fn {main} {+ {f} {f}}}})10)
+(check-equal? (top-interp '{{fn {u x} {- x}}
+                            {fn {f x y} {* x y}}
+                            {fn {main} {+ {f 6 4} {u 4}}}})20)
+
+(check-equal? (top-interp '{{fn {u x} {- x}}
+                            {fn {f x y} {* x y}}
+                            {fn {main} {+ {f 6 4} {u {- 6}}}}})30)
 
 
 
