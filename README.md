@@ -12,7 +12,8 @@ TODO Tasks:
  1. (Rohan) Convert to using a single "BinaryOperation" struct instead of separate Plus, Mult, etc. structs
  	Do this in ExprC struct
  	Modify parse to create binop structs instead of plus, mult, etc.
- 	Modify interpreter to evaluate binop structs
+ 	Modify interpreter to evaluate binop structs 
+	~ I am done with this ~ Rohan
 
  2. Add an "if statement", called ifleq0, to the ExprC struct, and 
  	modify the parser to accept ifleq0 s-expression and return ifleq0 structs, and 
