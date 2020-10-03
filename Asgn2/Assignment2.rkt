@@ -9,11 +9,13 @@
 ; Data Definitions:
 ;   ExprC, FunDefC
 
-(define-type ExprC (U NumC IdC AppC BinOp))
+(define-type ExprC (U NumC IdC AppC BinOp Ifleq0))
 (struct NumC ([n : Real]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : Symbol] [args : (Listof ExprC)]) #:transparent)
-(struct BinOp ([l : ExprC] [r : ExprC] [operator : Symbol])#:transparent)
+(struct BinOp ([l : ExprC] [r : ExprC] [operator : Symbol]) #:transparent)
+(struct Ifleq0 ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
+
 ;BinOp new struct which replaces the PlusC and MultC
 
 (struct FunDefC ([name : Symbol] [args : (Listof Symbol)] [body : ExprC]) #:transparent)
@@ -32,7 +34,8 @@
     [(list '* a b) (BinOp (parse-mod a) (parse-mod b) '*)]
     [(list '/ a b) (BinOp (parse-mod a) (parse-mod b) '/)]
     [(list '- a) (BinOp (parse-mod -1) (parse-mod a) '*)]
-    
+    [(list 'ifleq0 test then else) (Ifleq0 (parse-mod test) (parse-mod then) (parse-mod else))]
+   
     [(list (? symbol? n) args ...) (AppC n (map parse-mod (cast args (Listof Sexp))))]
     [else (error 'parse-mod "DXUQ invalid input to parse")]))
 
@@ -42,6 +45,9 @@
 (check-equal? (parse-mod '{- 9}) (BinOp (NumC -1) (NumC 9) '*))
 (check-equal? (parse-mod '{/ 10 2}) (BinOp (NumC 10) (NumC 2) '/))
 (check-equal? (parse-mod '{/ 8 0}) (BinOp (NumC 8) (NumC 0) '/))
+(check-equal? (parse-mod '{ifleq0 0 1 2}) (Ifleq0 (NumC 0) (NumC 1) (NumC 2)))
+(check-equal? (parse-mod '{ifleq0 8 8 8}) (Ifleq0 (NumC 8) (NumC 8) (NumC 8)))
+
 
 
 ;;maps an s-expression directly to an ExprC
@@ -55,6 +61,9 @@
               (BinOp (NumC 1) (BinOp (NumC -1) (BinOp (NumC 5) (NumC 6) '+) '*) '+))
 (check-equal? (parse-mod '{func {+ 1 5}})
               (AppC 'func (list(BinOp (NumC 1) (NumC 5) '+))))
+(check-equal? (parse-mod '{ifleq0 1 {+ 2 2} {- 5 2}})
+              (Ifleq0 (NumC 1) (BinOp (NumC 2) (NumC 2) '+) (BinOp (NumC 5)
+                 (BinOp (NumC -1) (NumC 2) '*) '+)))
 (check-equal? (parse-mod '{func})
               (AppC 'func '()))
 (check-exn (regexp (regexp-quote "DXUQ invalid input to parse"))
@@ -147,6 +156,10 @@
       [(BinOp l r '/) (/ (interp l fds) (match (interp r fds)
                                           [0 (error "DXUQ Cannot divide by Zero")]
                                           [(? real? r) r]))]
+      [(Ifleq0 test then e)
+         (cond
+           [(<= (interp test fds) 0) (interp then fds)]
+            [else (interp e fds)])]
       [(AppC f args) (define fd (get-fundef f fds))
                   (interp (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds)]))
 
@@ -161,6 +174,9 @@
 (check-= (interp (AppC 'func (list (NumC 10) (NumC 5)))
                  (list (FunDefC 'func '(x y) (BinOp (IdC 'x) (IdC 'y) '+))))
           15 EPSILON)
+(check-= (interp (Ifleq0 (NumC 0) (NumC 1) (NumC 2)) '()) 1 EPSILON)
+(check-= (interp (Ifleq0 (NumC -1) (NumC 1) (NumC 2)) '()) 1 EPSILON)
+(check-= (interp (Ifleq0 (NumC 1) (NumC 1) (NumC 2)) '()) 2 EPSILON)
 
 
 ;;intreprets the 'main' function, given a list of functions
