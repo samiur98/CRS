@@ -24,7 +24,7 @@ TODO Tasks:
  	modify parser to read in funcdef s-expressions and return fundefC struct
  	modify intpreter to evaluate fundefC structs
 
- 4. (I'm currently working on it - Sam)Divison (also prevent divide by zero. An error should be issued if this happens.) ~Sam
+ 4. (Finished ~ Rohan) Divison (also prevent divide by zero. An error should be issued if this happens.)
 
  5. Correct Errors - thrown at the right times and with the right messages
 

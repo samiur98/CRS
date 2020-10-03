@@ -4,6 +4,7 @@
 
 (define EPSILON 1e-05)
 
+;Division BY ZERO AND DXUQ ERROR CHECK IS COMPLETE
 ;-------------------------------------------------------------------------------------------
 ; Data Definitions:
 ;   ExprC, FunDefC
@@ -26,18 +27,21 @@
   (match s
     [(? real? a) (NumC a)]
     [(? symbol? id) (IdC id)]
-    [(list '* a b) (BinOp (parse-mod a) (parse-mod b) '*)]
     [(list '+ a b) (BinOp (parse-mod a) (parse-mod b) '+)]
     [(list '- a b) (BinOp (parse-mod a) (BinOp (parse-mod -1) (parse-mod b) '*) '+)]
+    [(list '* a b) (BinOp (parse-mod a) (parse-mod b) '*)]
+    [(list '/ a b) (BinOp (parse-mod a) (parse-mod b) '/)]
     [(list '- a) (BinOp (parse-mod -1) (parse-mod a) '*)]
     
     [(list (? symbol? n) args ...) (AppC n (map parse-mod (cast args (Listof Sexp))))]
-    [else (error 'parse-mod "invalid input to parse")]))
+    [else (error 'parse-mod "DXUQ invalid input to parse")]))
 
 (check-equal? (parse-mod '{+ 1 2}) (BinOp (NumC 1) (NumC 2) '+))
 (check-equal? (parse-mod '{* 1 2}) (BinOp (NumC 1) (NumC 2) '*))
 (check-equal? (parse-mod '{- 5 2}) (BinOp (NumC 5) (BinOp (NumC -1) (NumC 2) '*) '+))
 (check-equal? (parse-mod '{- 9}) (BinOp (NumC -1) (NumC 9) '*))
+(check-equal? (parse-mod '{/ 10 2}) (BinOp (NumC 10) (NumC 2) '/))
+(check-equal? (parse-mod '{/ 8 0}) (BinOp (NumC 8) (NumC 0) '/))
 
 
 ;;maps an s-expression directly to an ExprC
@@ -53,7 +57,7 @@
               (AppC 'func (list(BinOp (NumC 1) (NumC 5) '+))))
 (check-equal? (parse-mod '{func})
               (AppC 'func '()))
-(check-exn (regexp (regexp-quote "invalid input to parse"))
+(check-exn (regexp (regexp-quote "DXUQ invalid input to parse"))
            (lambda () (parse-mod "hello")))
 
 ;;parses a function definition, from an s-expression, into a FunDefC
@@ -61,13 +65,13 @@
   (match s
     [(list 'fn (list (? symbol? name) (? symbol? args) ...) body)
      (FunDefC name (cast args (Listof Symbol)) (parse-mod body))]
-    [else (error 'parse-fundef "invalid input to parse-fundef")]))
+    [else (error 'parse-fundef "DXUQ invalid input to parse-fundef")]))
 
 (check-equal? (parse-fundef '{fn {myfunc x y z} {+ 1 x}})
               (FunDefC 'myfunc '(x y z) (BinOp (NumC 1) (IdC 'x) '+)))
 (check-equal? (parse-fundef '{fn {myfunc} 2})
               (FunDefC 'myfunc '() (NumC 2)))
-(check-exn (regexp (regexp-quote "invalid input to parse-fundef"))
+(check-exn (regexp (regexp-quote "DXUQ invalid input to parse-fundef"))
            (lambda () (parse-fundef '(+ 1 4))))
 
 ;;parses a list a functions, given as an s-expression
@@ -120,7 +124,7 @@
 (define (get-fundef [n : Symbol] [fds : (Listof FunDefC)]) : FunDefC
     (cond
       [(empty? fds)
-       (error 'get-fundef "reference to undefined function")]
+       (error 'get-fundef "DXUQ reference to undefined function")]
       [(cons? fds)
        (cond
          [(equal? n (FunDefC-name (first fds))) (first fds)]
@@ -129,7 +133,7 @@
 (check-equal? (get-fundef 'func1 (list (FunDefC 'func2 '(x) (NumC 4))
                                        (FunDefC 'func1 '(x) (NumC 5))))
               (FunDefC 'func1 '(x) (NumC 5)))
-(check-exn (regexp (regexp-quote "get-fundef: reference to undefined function"))
+(check-exn (regexp (regexp-quote "get-fundef: DXUQ reference to undefined function"))
            (lambda () (get-fundef 'func '())))
 
 
@@ -140,8 +144,16 @@
       [(NumC n) n]
       [(BinOp l r '+) (+ (interp l fds) (interp r fds))]
       [(BinOp  l r '*) (* (interp l fds) (interp r fds))]
+      [(BinOp l r '/) (/ (interp l fds) (match (interp r fds)
+                                          [0 (error "DXUQ Cannot divide by Zero")]
+                                          [(? real? r) r]))]
       [(AppC f args) (define fd (get-fundef f fds))
                   (interp (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds)]))
+
+
+(check-= (interp (BinOp (NumC 10) (NumC 2) '/) '()) 5 EPSILON)
+(check-exn (regexp (regexp-quote "DXUQ Cannot divide by Zero"))
+           (lambda () (interp (BinOp (NumC 10) (NumC 0) '/) '())))
 
 (check-= (interp (BinOp (NumC 4) (NumC 5) '+) '()) 9 EPSILON)
 (check-= (interp (BinOp (NumC 4) (NumC 5) '*) '()) 20 EPSILON)
