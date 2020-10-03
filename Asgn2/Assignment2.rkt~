@@ -30,7 +30,6 @@
     [(list '+ a b) (BinOp (parse-mod a) (parse-mod b) '+)]
     [(list '- a b) (BinOp (parse-mod a) (BinOp (parse-mod -1) (parse-mod b) '*) '+)]
     [(list '- a) (BinOp (parse-mod -1) (parse-mod a) '*)]
-    
     [(list (? symbol? n) args ...) (AppC n (map parse-mod (cast args (Listof Sexp))))]
     [else (error 'parse-mod "invalid input to parse")]))
 
