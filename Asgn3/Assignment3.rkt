@@ -1,4 +1,3 @@
-;Rohan Ramani, Shah Samiur Rahman, Connor Boulais
 ;Assignment 2: DXUQ2 Parser and Interpreter
 
 #lang typed/racket
@@ -15,11 +14,11 @@
 (define-type ExprC (U NumC IdC AppC BinOp Ifleq0))
 (struct NumC ([n : Real]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
-(struct AppC ([fun : Symbol] [arg : ExprC]) #:transparent)
+(struct AppC ([fun : Symbol] [args : (Listof ExprC)]) #:transparent)
 (struct BinOp ([l : ExprC] [r : ExprC] [operator : Symbol]) #:transparent)
 (struct Ifleq0 ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
 
-(struct FunDefC ([name : Symbol] [arg : Symbol] [body : ExprC]) #:transparent)
+(struct FunDefC ([name : Symbol] [args : (Listof Symbol)] [body : ExprC]) #:transparent)
 ;-------------------------------------------------------------------------------------------
 ;Parse
 
@@ -53,7 +52,7 @@
                     [else (BinOp (parse a) (parse b) '/)])]
    [(list '- a) (BinOp (parse -1) (parse a) '*)]
    [(list 'ifleq0 test then else) (Ifleq0 (parse test) (parse then) (parse else))] 
-   [(list (? symbol? n) arg) (AppC n (parse arg))]
+   [(list (? symbol? n) args ...) (AppC n (map parse (cast args (Listof Sexp))))]
    [else (error 'parse "DXUQ invalid input to parse")]))
 
 
@@ -62,8 +61,8 @@
 ;Input: Sexp / Output: FunDefC Struct
 (define (parse-fundef [s : Sexp]) : FunDefC
  (match s
-   [(list 'fundef (list (? symbol? name) (? symbol? arg)) body)
-    (FunDefC name arg (parse body))]
+   [(list 'fundef (list (? symbol? name) (? symbol? args) ...) body)
+     (FunDefC name (cast args (Listof Symbol)) (parse body))]
    [else (error 'parse-fundef "DXUQ invalid input to parse-fundef")])) ;Not killing the call stack
 
 
@@ -89,8 +88,8 @@
    [(NumC n) in]
    [(IdC s) (cond
               [(symbol=? s for) what]
-              [else (error 'subst "DXUQ undefined identifier")])]
-   [(AppC f arg) (AppC f (subst what for arg))]
+              [else in])]
+   [(AppC f args) (AppC f (map (λ ([arg : ExprC]) (subst what for arg)) args))]
    [(BinOp l r '+) (BinOp (subst what for l)
                        (subst what for r) '+)]
    [(BinOp l r '*) (BinOp (subst what for l)
@@ -101,6 +100,15 @@
                             (subst what for test)
                             (subst what for then)
                             (subst what for else))]))
+
+
+;;calls subst for each argument in 'what', handling multi-arg functions
+(define (subst-args [args : (Listof ExprC)] [params : (Listof Symbol)] [in : ExprC]) : ExprC
+  (cond
+    [(empty? args) in]
+    [else (subst-args (rest args) (rest params) (subst (first args) (first params) in))]))
+#;(check-equal? (subst-args (list (NumC 4) (NumC 8)) '(x y) (BinOp (IdC 'x) (IdC 'y) '+))
+              (BinOp (NumC 4) (NumC 8) '+))
 
 
 ;;-----------------------------------------------------------------------------------------
@@ -141,17 +149,18 @@
         (cond
           [(<= (interp test fds) 0) (interp then fds)]
           [else (interp e fds)])]
-     [(AppC f arg) (define fd (get-fundef f fds))
-                 (interp (subst (NumC (interp arg fds)) (FunDefC-arg fd) (FunDefC-body fd)) fds)]))
-
-
+     [(AppC f args) (define fd (get-fundef f fds))
+                  (interp
+                   (NumC (interp (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds))
+                   fds)]
+     [(IdC s) (error 'interp "DXUQ undefined identifier")]))
 
 
 
 ;;Given the list of FunDefC structs, interp-fns interprets the main method.
 ;Input: List of FunDefC Structs / Output: Real
 (define (interp-fns [funs : (Listof FunDefC)]) : Real
- (interp (AppC 'main (NumC 0)) funs))
+ (interp (AppC 'main (list (NumC 0))) funs))
 
 
 
@@ -189,7 +198,7 @@
 (check-equal? (parse '{/ 10 2}) (BinOp (NumC 10) (NumC 2) '/))
 (check-equal? (parse '{* {- 1} 2}) (BinOp (BinOp (NumC -1) (NumC 1) '*) (NumC 2) '*))
 (check-equal? (parse '{- 1 {+ 5 6}}) (BinOp (NumC 1) (BinOp (NumC -1) (BinOp (NumC 5) (NumC 6) '+) '*) '+))
-(check-equal? (parse '{func {+ 1 5}})(AppC 'func (BinOp (NumC 1) (NumC 5) '+)))
+(check-equal? (parse '{func {+ 1 5}})(AppC 'func (list (BinOp (NumC 1) (NumC 5) '+))))
 (check-equal? (parse '{ifleq0 0 1 2}) (Ifleq0 (NumC 0) (NumC 1) (NumC 2)))
 (check-equal? (parse '{ifleq0 8 8 8}) (Ifleq0 (NumC 8) (NumC 8) (NumC 8)))
 (check-equal? (parse '{ifleq0 1 {+ 2 2} {- 5 2}})
@@ -205,7 +214,7 @@
 
 ;Test Cases for the parse-fundef function
 (check-equal? (parse-fundef '{fundef {myfunc x} {+ 1 x}})
-            (FunDefC 'myfunc 'x (BinOp (NumC 1) (IdC 'x) '+)))
+            (FunDefC 'myfunc '{x} (BinOp (NumC 1) (IdC 'x) '+)))
 (check-exn (regexp (regexp-quote "DXUQ invalid input to parse-fundef"))
           (lambda () (parse-fundef '(+ 1 4))))
 
@@ -214,7 +223,7 @@
 ;Test Cases for the parse-prog function
 (check-equal? (parse-prog '{})'())
 (check-equal? (parse-prog '{{fundef {myfunc x} {+ 1 x}}})
-            (list (FunDefC 'myfunc 'x (BinOp (NumC 1) (IdC 'x) '+))))
+            (list (FunDefC 'myfunc '{x} (BinOp (NumC 1) (IdC 'x) '+))))
 
 
 ;Test Cases for the subst function
@@ -222,16 +231,19 @@
             (BinOp (NumC 4) (NumC 1) '+))
 (check-equal? (subst (NumC 4) 'x (BinOp (IdC 'x) (NumC 2) '/))
             (BinOp (NumC 4) (NumC 2) '/))
-(check-equal? (subst (NumC 4) 'x (AppC 'func (BinOp (IdC 'x) (NumC 10) '+)))
-            (AppC 'func (BinOp (NumC 4) (NumC 10) '+)))
-(check-exn (regexp (regexp-quote "DXUQ undefined identifier"))
-          (lambda () (subst (NumC 4) 'x (BinOp (IdC 'z) (NumC 1) '+))))
+(check-equal? (subst (NumC 4) 'x (AppC 'func (list (BinOp (IdC 'x) (NumC 10) '+))))
+            (AppC 'func (list (BinOp (NumC 4) (NumC 10) '+))))
+
+
+;Test Cases for the subst-args function
+(check-equal? (subst-args (list (NumC 4) (NumC 8)) '(x y) (BinOp (IdC 'x) (IdC 'y) '+))
+              (BinOp (NumC 4) (NumC 8) '+))
 
 
 ;Test Cases for the get-fundef function
-(check-equal? (get-fundef 'func1 (list (FunDefC 'func2 'x (NumC 4))
-                                      (FunDefC 'func1 'x (NumC 5))))
-            (FunDefC 'func1 'x (NumC 5)))
+(check-equal? (get-fundef 'func1 (list (FunDefC 'func2 '{x} (NumC 4))
+                                      (FunDefC 'func1 '{x} (NumC 5))))
+            (FunDefC 'func1 '{x} (NumC 5)))
 (check-exn (regexp (regexp-quote "get-fundef: DXUQ reference to undefined function"))
           (lambda () (get-fundef 'func '())))
 
@@ -250,17 +262,19 @@
 (check-= (interp (BinOp (NumC 4) (NumC 5) '+) '()) 9 EPSILON)
 (check-= (interp (BinOp (NumC 4) (NumC 5) '*) '()) 20 EPSILON)
 (check-= (interp (BinOp (BinOp (NumC 3) (NumC 2) '*) (NumC 5) '+) '()) 11 EPSILON)
-(check-= (interp (AppC 'func (NumC 10))
-               (list (FunDefC 'func 'x (BinOp (IdC 'x) (NumC 1) '+))))
+(check-= (interp (AppC 'func (list (NumC 10)))
+               (list (FunDefC 'func '{x} (BinOp (IdC 'x) (NumC 1) '+))))
          11 EPSILON)
 (check-= (interp (Ifleq0 (NumC 0) (NumC 1) (NumC 2)) '()) 1 EPSILON)
 (check-= (interp (Ifleq0 (NumC -1) (NumC 1) (NumC 2)) '()) 1 EPSILON)
 (check-= (interp (Ifleq0 (NumC 1) (NumC 1) (NumC 2)) '()) 2 EPSILON)
+(check-exn (regexp (regexp-quote "DXUQ undefined identifier"))
+          (lambda () (interp (BinOp (IdC 'z) (NumC 1) '+) '())))
 
 
 ;Test Cases for the interp-fns function
 (check-equal? (interp-fns
-              (list (FunDefC 'func 'x (NumC 4)) (FunDefC 'main 'init (NumC 5))))5)
+              (list (FunDefC 'func '{x} (NumC 4)) (FunDefC 'main '{init} (NumC 5))))5)
 (check-equal? (interp-fns
       (parse-prog '{{fundef {f x} {+ x 5}}
                     {fundef {main init} {f 1}}})) 6)
@@ -274,7 +288,7 @@
                           {fundef {main init} {f 1}}}) 3)
 (check-equal? (top-interp '{{fundef {f p} {* {- 10 5} p}}
                           {fundef {main init} {+ {f 2} {f 3}}}})25)
-(check-equal? (top-interp '{{fundef {u x} {- x}}
-                          {fundef {f x} {* x 10}}
-                          {fundef {main init} {+ {f 6} {u 4}}}})56)
+(check-equal? (top-interp '{{fundef {u} {- 5}}
+                          {fundef {f x y} {* x y}}
+                          {fundef {main init} {+ {f 6 5} {u}}}})25)
 (check-equal? (top-interp '{{fundef {main init} {ifleq0 {* 3 1} 3 {+ 2 9}}}}) 11)
