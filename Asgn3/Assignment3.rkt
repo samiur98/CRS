@@ -107,8 +107,6 @@
   (cond
     [(empty? args) in]
     [else (subst-args (rest args) (rest params) (subst (first args) (first params) in))]))
-#;(check-equal? (subst-args (list (NumC 4) (NumC 8)) '(x y) (BinOp (IdC 'x) (IdC 'y) '+))
-              (BinOp (NumC 4) (NumC 8) '+))
 
 
 ;;-----------------------------------------------------------------------------------------
@@ -160,7 +158,7 @@
 ;;Given the list of FunDefC structs, interp-fns interprets the main method.
 ;Input: List of FunDefC Structs / Output: Real
 (define (interp-fns [funs : (Listof FunDefC)]) : Real
- (interp (AppC 'main (list (NumC 0))) funs))
+ (interp (AppC 'main '()) funs))
 
 
 
@@ -233,6 +231,8 @@
             (BinOp (NumC 4) (NumC 2) '/))
 (check-equal? (subst (NumC 4) 'x (AppC 'func (list (BinOp (IdC 'x) (NumC 10) '+))))
             (AppC 'func (list (BinOp (NumC 4) (NumC 10) '+))))
+(check-equal? (subst (NumC 4) 'x (Ifleq0 (IdC 'x) (NumC 2) (NumC 3)))
+            (Ifleq0 (NumC 4) (NumC 2) (NumC 3)))
 
 
 ;Test Cases for the subst-args function
@@ -274,21 +274,25 @@
 
 ;Test Cases for the interp-fns function
 (check-equal? (interp-fns
-              (list (FunDefC 'func '{x} (NumC 4)) (FunDefC 'main '{init} (NumC 5))))5)
+              (list (FunDefC 'func '{x} (NumC 4)) (FunDefC 'main '{} (NumC 5))))5)
 (check-equal? (interp-fns
       (parse-prog '{{fundef {f x} {+ x 5}}
-                    {fundef {main init} {f 1}}})) 6)
+                    {fundef {main} {f 1}}})) 6)
 (check-equal? (interp-fns
        (parse-prog '{{fundef {f var} {* var 2}}
-                     {fundef {main init} {+ {f 4} {f 5}}}}))18)
+                     {fundef {main} {+ {f 4} {f 5}}}}))18)
 
 
 ;Test Cases for the top-interp function
 (check-equal? (top-interp '{{fundef {f x} {+ x 2}}
-                          {fundef {main init} {f 1}}}) 3)
+                          {fundef {main} {f 1}}}) 3)
 (check-equal? (top-interp '{{fundef {f p} {* {- 10 5} p}}
-                          {fundef {main init} {+ {f 2} {f 3}}}})25)
+                          {fundef {main} {+ {f 2} {f 3}}}})25)
 (check-equal? (top-interp '{{fundef {u} {- 5}}
                           {fundef {f x y} {* x y}}
-                          {fundef {main init} {+ {f 6 5} {u}}}})25)
-(check-equal? (top-interp '{{fundef {main init} {ifleq0 {* 3 1} 3 {+ 2 9}}}}) 11)
+                          {fundef {main} {+ {f 6 5} {u}}}})25)
+(check-equal? (top-interp '{{fundef {f x y} {ifleq0 {- x y} x y}}
+                            {fundef {main} {f 6 5}}})5)
+(check-equal? (top-interp '{{fundef {main} {ifleq0 {* 3 1} 3 {+ 2 9}}}}) 11)
+
+
