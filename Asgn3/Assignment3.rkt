@@ -25,7 +25,7 @@
 ;Helper function for the Parse function
 ;Given a symbol, valid-idc returns a boolean representing whether the symbol is a valid argument to BinOp
 ;Input: Symbol / Output: Boolean
-(define (valid-idc [id : Symbol]) : Boolean
+(define (valid-idc [id : Sexp]) : Boolean
   (match id
     ['+ #f]
     ['- #f]
@@ -48,11 +48,14 @@
    [(list '- a b) (BinOp (parse a) (BinOp (parse -1) (parse b) '*) '+)]
    [(list '* a b) (BinOp (parse a) (parse b) '*)]
    [(list '/ a b) (cond
-                    [(equal? b '0) (error 'parse "DXUQ cannot divide by zero")]
+                    [#f (error 'parse "DXUQ cannot divide by zero")]
                     [else (BinOp (parse a) (parse b) '/)])]
    [(list '- a) (BinOp (parse -1) (parse a) '*)]
    [(list 'ifleq0 test then else) (Ifleq0 (parse test) (parse then) (parse else))] 
-   [(list (? symbol? n) args ...) (AppC n (map parse (cast args (Listof Sexp))))]
+   [(list (? symbol? n) args_p ...)
+    (define args (cast args_p (Listof Sexp)))
+    (cond [(not (valid-idc n)) (error "DXUQ invalid syntax")])
+    (AppC n (map parse args))]
    [else (error 'parse "DXUQ invalid input to parse")]))
 
 
@@ -61,9 +64,11 @@
 ;Input: Sexp / Output: FunDefC Struct
 (define (parse-fundef [s : Sexp]) : FunDefC
  (match s
-   [(list 'fundef (list (? symbol? name) (? symbol? args) ...) body)
-     (FunDefC name (cast args (Listof Symbol)) (parse body))]
-   [else (error 'parse-fundef "DXUQ invalid input to parse-fundef")])) ;Not killing the call stack
+   [(list 'fundef (list (? symbol? name) (? symbol? args_t) ...) body)
+    (define args (cast args_t (Listof Symbol)))
+    (cond [(check-duplicates args) (error "DXUQ invalid syntax")])
+     (FunDefC name args (parse body))]
+   [else (error 'parse-fundef "DXUQ invalid input to parse-fundef")]))
 
 
 
@@ -142,16 +147,20 @@
 (define (interp [a : ExprC] [fds : (Listof FunDefC)]) : Real
    (match a
      [(NumC n) n]
-     [(BinOp l r (? symbol? s)) ((symbol->arith s) (interp l fds) (interp r fds))]
+     [(BinOp l r (? symbol? s))
+      (define right (interp r fds))
+      (cond [(and (equal? right 0) (equal? s '/)) (error "DXUQ division by zero")])
+      ((symbol->arith s) (interp l fds) right)]
      [(Ifleq0 test then e)
         (cond
           [(<= (interp test fds) 0) (interp then fds)]
           [else (interp e fds)])]
+     [(IdC s) (error 'interp "DXUQ undefined identifier")]
      [(AppC f args) (define fd (get-fundef f fds))
-                  (interp
-                   (NumC (interp (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds))
-                   fds)]
-     [(IdC s) (error 'interp "DXUQ undefined identifier")]))
+                    (cond [(not (equal? (length args) (length (FunDefC-args fd))))
+                           (error f "DXUQ wrong number of arguments provided")])
+                    (interp (NumC (interp
+                                   (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds))fds)]))
 
 
 
@@ -208,6 +217,9 @@
           (lambda () (parse "hello")))
 (check-exn (regexp (regexp-quote "DXUQ cannot divide by zero"))
           (lambda () (parse '{/ 8 0})))
+(check-exn (regexp (regexp-quote "DXUQ invalid syntax"))
+          (lambda () (parse '{/ 3 4 5})))
+
 
 
 ;Test Cases for the parse-fundef function
@@ -294,5 +306,21 @@
 (check-equal? (top-interp '{{fundef {f x y} {ifleq0 {- x y} x y}}
                             {fundef {main} {f 6 5}}})5)
 (check-equal? (top-interp '{{fundef {main} {ifleq0 {* 3 1} 3 {+ 2 9}}}}) 11)
+(check-exn (regexp (regexp-quote "DXUQ wrong number of arguments provided"))
+          (lambda () (top-interp '{{fundef {f p} {* {- 10 5} p}}
+                          {fundef {main} {+ {f 2 3} {f 3}}}})))
+(check-exn (regexp (regexp-quote "DXUQ invalid syntax"))
+          (lambda () (top-interp '{{fundef {f p p} {* p p}}
+                            {fundef {main} {f 1 6}}})))
+
+
+;expected exception with message containing DXUQ on test expression:
+(top-interp
+ '((fundef (ignoreit x) (+ 3 4))
+   (fundef (main) (ignoreit (/ 1 0)))))
+
+
+
+
 
 
