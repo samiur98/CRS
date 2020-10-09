@@ -1,7 +1,9 @@
-;Assignment 2: DXUQ2 Parser and Interpreter
+;Assignment 3: DXUQ2 Parser and Interpreter with multiple arguments.
+
 ;The project has been finished. All functions have been implemented and they
 ;have been tested by a suite of test cases that test all main functions as well
 ;as helper functions.
+
 #lang typed/racket
 
 (require typed/rackunit)
@@ -19,18 +21,16 @@
 (struct AppC ([fun : Symbol] [args : (Listof ExprC)]) #:transparent)
 (struct BinOp ([l : ExprC] [r : ExprC] [operator : Symbol]) #:transparent)
 (struct Ifleq0 ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
-
 (struct FunDefC ([name : Symbol] [args : (Listof Symbol)] [body : ExprC]) #:transparent)
+;-------------------------------------------------------------------------------------------
 
-;;---------------------------------------------------------------------------------------------
-
-; top-interp
+;;top-interp
 ;;Given an SExpression, fun-sexps returns a Real by evaluating the expression
 ;Input: Sexp / Output: Real
 (define (top-interp [fun-sexps : Sexp]) : Real
  (interp-fns (parse-prog fun-sexps)))
 
-;;---------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;interp-fns
 ;;Given the list of FunDefC structs, interp-fns interprets the main method.
@@ -38,7 +38,7 @@
 (define (interp-fns [funs : (Listof FunDefC)]) : Real
  (interp (AppC 'main '()) funs))
 
-;;--------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;interp
 ;;Given an ExprC and a list of FunDefC structrs, interp evaluates the expression and returns a real
@@ -58,10 +58,11 @@
      [(AppC f args) (define fd (get-fundef f fds))
                     (cond [(not (equal? (length args) (length (FunDefC-args fd))))
                            (error f "DXUQ wrong number of arguments provided")])
-                    (interp (NumC (interp
-                                   (subst-args args (FunDefC-args fd) (FunDefC-body fd)) fds))fds)]))
+                    (interp (subst-args
+                             (map (λ ([x : ExprC]) (NumC (interp x fds))) args)
+                             (FunDefC-args fd) (FunDefC-body fd)) fds)]))
 
-;;--------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;symbol->arith
 ;Function that serves as a Lookup table where the input which is a symbol is mapped to an arithmetic function.
@@ -74,17 +75,17 @@
     ['/ /]
     [else (error 'symbol->arith "DXUQ invalid input")]))
 
-;;--------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;subst-args
 ;;calls subst for each argument in 'what', handling multi-arg functions
-;Input: List of ExprC/ListOf Symbol/ExrC
+;Input: List of ExprC/ListOf Symbol/ExrC / Output: ExprC
 (define (subst-args [args : (Listof ExprC)] [params : (Listof Symbol)] [in : ExprC]) : ExprC
   (cond
     [(empty? args) in]
     [else (subst-args (rest args) (rest params) (subst (first args) (first params) in))]))
 
-;;---------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;subst
 ;Given an ExprC, a symbol and another ExprC, subst returns an ExprC struct substituting the symbol
@@ -108,7 +109,7 @@
                             (subst what for then)
                             (subst what for else))]))
 
-;;--------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;parse-prog
 ;;Given an SExpression, parse-prog returns a List of FunDefC structs representing a parsed version of FundefC structs.
@@ -117,7 +118,7 @@
  (match s
    [(list funs ...) (map parse-fundef funs)]))
 
-;;---------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;parse-fundef
 ;Given a SExpression, parse-fundef returns a FunDefC struct representing the parsed version of the SExpression
@@ -130,9 +131,9 @@
      (FunDefC name args (parse body))]
    [else (error 'parse-fundef "DXUQ invalid input to parse-fundef")]))
 
-;;---------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
-;Parse
+;parse
 ;Given an SExpression, parse returns an ExprC struct representing a parsed version of the SExpression
 ;Input: Sexp / Output: ExprC Struct
 (define (parse [s : Sexp]) : ExprC
@@ -144,9 +145,7 @@
    [(list '+ a b) (BinOp (parse a) (parse b) '+)]
    [(list '- a b) (BinOp (parse a) (BinOp (parse -1) (parse b) '*) '+)]
    [(list '* a b) (BinOp (parse a) (parse b) '*)]
-   [(list '/ a b) (cond
-                    [#f (error 'parse "DXUQ cannot divide by zero")]
-                    [else (BinOp (parse a) (parse b) '/)])]
+   [(list '/ a b) (BinOp (parse a) (parse b) '/)]
    [(list '- a) (BinOp (parse -1) (parse a) '*)]
    [(list 'ifleq0 test then else) (Ifleq0 (parse test) (parse then) (parse else))] 
    [(list (? symbol? n) args_p ...)
@@ -155,7 +154,7 @@
     (AppC n (map parse args))]
    [else (error 'parse "DXUQ invalid input to parse")]))
 
-;;---------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;valid-idc
 ;Given a symbol, valid-idc returns a boolean representing whether the symbol is a valid argument to BinOp
@@ -170,7 +169,7 @@
     ['fundef #f]
     [else #t]))
 
-;;---------------------------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------------
 
 ;get-fundef
 ;Given an input of a symbol and a list of FunDefC structs, get-fundef returns a single funDefC
@@ -185,10 +184,8 @@
         [(equal? n (FunDefC-name (first fds))) (first fds)]
         [else (get-fundef n (rest fds))])]))
 
-
 ;;----------------------------------------------------------------------------------------------
 ;;----------------------------------------------------------------------------------------------
-
 ;Test Cases
 
 ;Test Cases for the top-interp function
@@ -232,6 +229,8 @@
 (check-= (interp (Ifleq0 (NumC 1) (NumC 1) (NumC 2)) '()) 2 EPSILON)
 (check-exn (regexp (regexp-quote "DXUQ undefined identifier"))
           (lambda () (interp (BinOp (IdC 'z) (NumC 1) '+) '())))
+(check-exn (regexp (regexp-quote "DXUQ division by zero"))
+          (lambda () (interp (BinOp (NumC 4) (NumC 0) '/) '())))
 
 ;Test Cases for the symbol->arith function
 (check-equal? (symbol->arith '+) +)
@@ -260,6 +259,7 @@
 (check-equal? (parse-prog '{{fundef {myfunc x} {+ 1 x}}})
             (list (FunDefC 'myfunc '{x} (BinOp (NumC 1) (IdC 'x) '+))))
 
+
 ;Test Cases for the parse-fundef function
 (check-equal? (parse-fundef '{fundef {myfunc x} {+ 1 x}})
             (FunDefC 'myfunc '{x} (BinOp (NumC 1) (IdC 'x) '+)))
@@ -284,7 +284,7 @@
           (lambda () (parse '{+ / 3})))
 (check-exn (regexp (regexp-quote "DXUQ invalid input to parse"))
           (lambda () (parse "hello")))
-(check-exn (regexp (regexp-quote "DXUQ cannot divide by zero"))
+#;(check-exn (regexp (regexp-quote "DXUQ cannot divide by zero"))
           (lambda () (parse '{/ 8 0})))
 (check-exn (regexp (regexp-quote "DXUQ invalid syntax"))
           (lambda () (parse '{/ 3 4 5})))
