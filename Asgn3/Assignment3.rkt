@@ -63,6 +63,20 @@
                              (FunDefC-args fd) (FunDefC-body fd)) fds)]))
 
 ;-----------------------------------------------------------------------------------------
+;get-fundef
+;Given an input of a symbol and a list of FunDefC structs, get-fundef returns a single funDefC
+;struct that matches with the symbol passed in.
+;Input: Symbol/List of FundefC structs / Output: FunDefC struct
+(define (get-fundef [n : Symbol] [fds : (Listof FunDefC)]) : FunDefC
+   (cond
+     [(empty? fds)
+      (error 'get-fundef "DXUQ reference to undefined function")]
+     [(cons? fds)
+      (cond
+        [(equal? n (FunDefC-name (first fds))) (first fds)]
+        [else (get-fundef n (rest fds))])]))
+
+;-----------------------------------------------------------------------------------------
 
 ;symbol->arith
 ;Function that serves as a Lookup table where the input which is a symbol is mapped to an arithmetic function.
@@ -169,20 +183,6 @@
     ['fundef #f]
     [else #t]))
 
-;-----------------------------------------------------------------------------------------
-
-;get-fundef
-;Given an input of a symbol and a list of FunDefC structs, get-fundef returns a single funDefC
-;struct that matches with the symbol passed in.
-;Input: Symbol/List of FundefC structs / Output: FunDefC struct
-(define (get-fundef [n : Symbol] [fds : (Listof FunDefC)]) : FunDefC
-   (cond
-     [(empty? fds)
-      (error 'get-fundef "DXUQ reference to undefined function")]
-     [(cons? fds)
-      (cond
-        [(equal? n (FunDefC-name (first fds))) (first fds)]
-        [else (get-fundef n (rest fds))])]))
 
 ;;----------------------------------------------------------------------------------------------
 ;;----------------------------------------------------------------------------------------------
