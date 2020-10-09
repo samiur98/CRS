@@ -284,8 +284,6 @@
           (lambda () (parse '{+ / 3})))
 (check-exn (regexp (regexp-quote "DXUQ invalid input to parse"))
           (lambda () (parse "hello")))
-#;(check-exn (regexp (regexp-quote "DXUQ cannot divide by zero"))
-          (lambda () (parse '{/ 8 0})))
 (check-exn (regexp (regexp-quote "DXUQ invalid syntax"))
           (lambda () (parse '{/ 3 4 5})))
 
