@@ -15,63 +15,76 @@
 ;   ExprC, FunDefC
 
 ;Creating the data-types of both the ExprC and the FunDefC
-(define-type ExprC (U NumC IdC AppC BinOp Ifleq0))
+(define-type ExprC (U NumC IdC AppC LamC))
 (struct NumC ([n : Real]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
-(struct AppC ([fun : FunV] [args : (Listof ExprC)]) #:transparent)
-(struct BinOp ([l : ExprC] [r : ExprC] [operator : Symbol]) #:transparent)
-(struct Ifleq0 ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
-(struct FunDefC ([name : Symbol] [args : (Listof Symbol)] [body : ExprC]) #:transparent)
+(struct AppC ([fun : ExprC] [args : (Listof ExprC)]) #:transparent)
+(struct LamC ([param : (Listof Symbol)] [body : ExprC])  #:transparent)
 
 ;define Environment
 (define-type Env (Listof Binding))
-(struct Binding ((id : Symbol) (val : Real)))
+(struct Binding ((id : Symbol) (val : Value)) #:transparent)
 
-(struct FunV ([params : (Listof IdC)] [body : ExprC]))
+;define Value
+(define-type Value (U FunV NumV PrimV))
+(struct NumV ([n : Real]) #:transparent)
+(struct FunV ([params : (Listof Symbol)] [body : ExprC]) #:transparent)
+(struct PrimV ([s : Symbol]) #:transparent)
+
+;define top-env
+(define top-env (list (Binding '+ (PrimV '+))
+                      (Binding '* (PrimV '*))
+                      (Binding '/ (PrimV '/))
+                      (Binding '- (PrimV '-))))
 
 ;-------------------------------------------------------------------------------------------
 
 ;;top-interp
 ;;Given an SExpression, fun-sexps returns a Real by evaluating the expression
 ;Input: Sexp / Output: Real
-#;(define (top-interp [fun-sexps : Sexp]) : Real
- (interp-fns (parse-prog fun-sexps)))
-
-;-----------------------------------------------------------------------------------------
-
-;interp-fns
-;;Given the list of FunDefC structs, interp-fns interprets the main method.
-;Input: List of FunDefC Structs / Output: Real
-#;(define (interp-fns [funs : (Listof FunDefC)]) : Real
- (interp (AppC 'main '()) funs))
+(define (top-interp [sexps : Sexp] [topEnv : Env]) : Value
+ (interp (parse sexps) topEnv))
 
 ;-----------------------------------------------------------------------------------------
 
 ;interp
 ;;Given an ExprC and a list of FunDefC structrs, interp evaluates the expression and returns a real
 ;Input: ExprC/List of FunDefC structs / Output: Real
-(define (interp [a : ExprC] [env : Env]) : Real
+(define (interp [a : ExprC] [env : Env]) : Value
    (match a
-     [(NumC n) n]
+     
+     [(NumC n) (NumV n)]
+     
      [(IdC s) (env-lookup s env)]
-     #;[(BinOp l r '/)
-      (define right (interp r env))
-      (cond [(equal? right 0) (error "DXUQ division by zero")])
-      ((symbol->arith '/) (interp l env) right)]
-     [(BinOp l r (? symbol? s)) ((symbol->arith s) (interp l env) (interp r env))]
-     #;[(Ifleq0 test then e)
-        (cond
-          [(<= (interp test env) 0) (interp then env)]
-          [else (interp e env)])]
-     [(AppC funV args) (interp (FunV-body funV)
-                               (env-extend-all
-                                (FunV-params funV)
-                                (map (λ ([x : ExprC]) (interp x env)) args) env))]))
+
+     [(LamC param body) (FunV param body)]
+     
+     [(AppC fun args)
+      
+      ;evaluate expression that should return a function value
+      (define funval (interp fun env))
+      
+      (match funval
+        [(PrimV s) (eval-prim s (map (λ ([x : ExprC]) (interp x env)) args))]
+        [(FunV params body)
+         (interp body
+          (env-extend-all params (map (λ ([x : ExprC]) (interp x env)) args) env))]
+        [else (error 'interp "invalid function call")])]))
+
+;-------------------------------------------------------------------------------------------
+
+;evaluates a primitive function to a NumV
+(define (eval-prim [s : Symbol] [args : (Listof Value)]) : Value
+  (match args
+    [(list (? NumV? a) (? NumV? b))
+     (NumV ((symbol->arith s) (NumV-n a) (NumV-n b)))]
+    [else (error 'eval-prim (string-append "invalid arguments passed to "
+                                           (symbol->string s)))]))
 
 ;-------------------------------------------------------------------------------------------
 
 ;;grabs the value of an id in a given environment
-(define (env-lookup [id : Symbol] [env : Env]) : Real
+(define (env-lookup [id : Symbol] [env : Env]) : Value
   (cond
     [(empty? env)
      (error 'env-lookup (string-append "DXUQ unbound identifier: " (symbol->string id)))]
@@ -81,7 +94,7 @@
 ;-------------------------------------------------------------------------------------------
 
 ;;adds a list of parameters with a list of arguments to an env
-(define (env-extend-all [params : (Listof IdC)] [args : (Listof Real)] [env : Env]) : Env
+(define (env-extend-all [params : (Listof Symbol)] [args : (Listof Value)] [env : Env]) : Env
   (cond
     [(empty? params) env]
     [else (env-extend-all
@@ -92,9 +105,8 @@
 ;-------------------------------------------------------------------------------------------
 
 ;;adds a binding to an environment
-(define (env-extend [param : IdC] [arg : Real] [env : Env]) : Env
-  (define bind (Binding (IdC-s param) arg))
-  (cons bind env))
+(define (env-extend [param : Symbol] [arg : Value] [env : Env]) : Env
+  (cons (Binding param arg) env))
 
 ;-----------------------------------------------------------------------------------------
 
@@ -114,22 +126,15 @@
 ;parse
 ;Given an SExpression, parse returns an ExprC struct representing a parsed version of the SExpression
 ;Input: Sexp / Output: ExprC Struct
-#;(define (parse [s : Sexp]) : ExprC
+(define (parse [s : Sexp]) : ExprC
  (match s
    [(? real? a) (NumC a)]
-   [(? symbol? id) (cond 
-                         [(valid-idc id) (IdC id)]
-                         [else (error 'parse "DXUQ invalid identifier in parse")])]
-   [(list '+ a b) (BinOp (parse a) (parse b) '+)]
-   [(list '- a b) (BinOp (parse a) (BinOp (parse -1) (parse b) '*) '+)]
-   [(list '* a b) (BinOp (parse a) (parse b) '*)]
-   [(list '/ a b) (BinOp (parse a) (parse b) '/)]
-   [(list '- a) (BinOp (parse -1) (parse a) '*)]
-   [(list 'ifleq0 test then else) (Ifleq0 (parse test) (parse then) (parse else))] 
-   #;[(list (? symbol? n) args_p ...)
-    (define args (cast args_p (Listof Sexp)))
-    (cond [(not (valid-idc n)) (error "DXUQ invalid syntax")])
-    (AppC n (map parse args))]
+   [(? symbol? id) (cond [(valid-idc id) (IdC id)]
+                         [else (error 'parse (string-append
+                                              "DXUQ invalid identifier: "
+                                              (symbol->string id)))])]
+   [(list 'fn (list (? symbol? params) ...) body) (LamC (cast params (Listof Symbol)) (parse body))]
+   [(list fun args ...) (AppC (parse fun) (map parse args))]
    [else (error 'parse "DXUQ invalid input to parse")]))
 
 ;-----------------------------------------------------------------------------------------
@@ -139,12 +144,10 @@
 ;Input: Symbol / Output: Boolean
 (define (valid-idc [id : Sexp]) : Boolean
   (match id
-    ['+ #f]
-    ['- #f]
-    ['/ #f]
-    ['* #f]
-    ['ifleq0 #f]
-    ['fundef #f]
+    ['let #f]
+    ['in #f]
+    ['if #f]
+    ['fn #f]
     [else #t]))
 
 
@@ -159,17 +162,35 @@
 
 
 ;Test Cases for the interp
+(check-equal? (interp (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env) (NumV 9))
+(check-equal? (interp (AppC (IdC '-) (list (NumC 10) (NumC 5))) top-env) (NumV 5))
+(check-equal? (interp (AppC (IdC '*) (list (NumC 10) (NumC 5))) top-env) (NumV 50))
 (check-equal? (interp (AppC
-         (FunV (list (IdC 'x)) (BinOp (NumC 1) (IdC 'x) '+))
-         (list (NumC 5))) '()) 6)
-(check-equal? (interp (AppC
-         (FunV (list (IdC 'x) (IdC 'y)) (BinOp (IdC 'x) (IdC 'y) '*))
-         (list (NumC 5) (NumC 6))) '()) 30)
+                       (LamC (list 'x) (AppC (IdC '+) (list (IdC 'x) (NumC 1)))) (list (NumC 5)))
+                      top-env) (NumV 6))
+(check-equal? (interp(AppC
+                      (LamC (list 'x 'y)
+                            (AppC (IdC '+) (list (IdC 'x) (IdC 'y)))) (list (NumC 25)(NumC 5)))
+                      top-env) (NumV 30))
+(check-exn (regexp (regexp-quote "invalid function call"))
+          (lambda () (interp (AppC (NumC 5) (list (NumC 4) (NumC 5))) top-env)))
+
 
 ;Test cases for env-lookup
-(check-equal? (env-lookup 'var (list (Binding 'var 4))) 4)
+(check-equal? (env-lookup 'var (list (Binding 'var (NumV 4)))) (NumV 4))
 (check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
-          (lambda () (env-lookup 'x (list (Binding 'y 4)))))
+          (lambda () (env-lookup 'x (list (Binding 'y (NumV 4))))))
+
+;Test cases for eval-prim
+(check-equal? (eval-prim '+ (list (NumV 5) (NumV 6))) (NumV 11))
+(check-equal? (eval-prim '/ (list (NumV 100) (NumV 5))) (NumV 20))
+(check-equal? (eval-prim '- (list (NumV 100) (NumV 5))) (NumV 95))
+(check-equal? (eval-prim '* (list (NumV 100) (NumV 5))) (NumV 500))
+(check-exn (regexp (regexp-quote "invalid arguments passed to +"))
+          (lambda () (eval-prim '+ (list (NumV 5) (NumV 6) (NumV 5)))))
+(check-exn (regexp (regexp-quote "invalid arguments passed to -"))
+          (lambda () (eval-prim '- (list (PrimV '+) (NumV 6) (NumV 5)))))
+
 
 ;Test Cases for the symbol->arith
 (check-equal? (symbol->arith '+) +)
@@ -181,31 +202,21 @@
 
 
 ;Test Cases for the parse
-;(check-equal? (parse '{+ 1 2}) (BinOp (NumC 1) (NumC 2) '+))
-;(check-equal? (parse '{* 1 2}) (BinOp (NumC 1) (NumC 2) '*))
-;(check-equal? (parse '{- 5 2}) (BinOp (NumC 5) (BinOp (NumC -1) (NumC 2) '*) '+))
-;(check-equal? (parse '{- 9}) (BinOp (NumC -1) (NumC 9) '*))
-;(check-equal? (parse '{/ 10 2}) (BinOp (NumC 10) (NumC 2) '/))
-;(check-equal? (parse '{* {- 1} 2}) (BinOp (BinOp (NumC -1) (NumC 1) '*) (NumC 2) '*))
-;(check-equal? (parse '{- 1 {+ 5 6}}) (BinOp (NumC 1) (BinOp (NumC -1) (BinOp (NumC 5) (NumC 6) '+) '*) '+))
-;(check-equal? (parse '{func {+ 1 5}})(AppC 'func (list (BinOp (NumC 1) (NumC 5) '+))))
-;(check-equal? (parse '{ifleq0 0 1 2}) (Ifleq0 (NumC 0) (NumC 1) (NumC 2)))
-;(check-equal? (parse '{ifleq0 8 8 8}) (Ifleq0 (NumC 8) (NumC 8) (NumC 8)))
-#;(check-equal? (parse '{ifleq0 1 {+ 2 2} {- 5 2}})
-            (Ifleq0 (NumC 1) (BinOp (NumC 2) (NumC 2) '+) (BinOp (NumC 5)
-               (BinOp (NumC -1) (NumC 2) '*) '+)))
-#;(check-exn (regexp (regexp-quote "DXUQ invalid identifier in parse"))
-          (lambda () (parse '{+ / 3})))
-#;(check-exn (regexp (regexp-quote "DXUQ invalid input to parse"))
-          (lambda () (parse "hello")))
-#;(check-exn (regexp (regexp-quote "DXUQ invalid syntax"))
-          (lambda () (parse '{/ 3 4 5})))
+(check-equal? (parse '{+ 1 2}) (AppC (IdC '+) (list (NumC 1) (NumC 2))))
+(check-equal? (parse '{fn {x y} {* x y}})
+              (LamC (list 'x 'y) (AppC (IdC '*) (list (IdC 'x) (IdC 'y)))))
+(check-equal? (parse '{{fn {x y} {* x y}} 2 16})
+              (AppC (LamC (list 'x 'y) (AppC (IdC '*) (list (IdC 'x) (IdC 'y))))
+                    (list (NumC 2) (NumC 16))))
+(check-exn (regexp (regexp-quote "DXUQ invalid identifier: in"))
+          (lambda () (parse '{{fn {in y} {* in y}} 2 16})))
+(check-exn (regexp (regexp-quote "DXUQ invalid input to parse"))
+          (lambda () (parse '{})))
 
 ;Test Cases for the valid
 (check-equal? (valid-idc 'x) #t)
-(check-equal? (valid-idc '+) #f)
-(check-equal? (valid-idc '/) #f)
-(check-equal? (valid-idc '*) #f)
-(check-equal? (valid-idc '-) #f)
-(check-equal? (valid-idc 'ifleq0) #f)
-(check-equal? (valid-idc 'fundef) #f)
+(check-equal? (valid-idc '+) #t)
+(check-equal? (valid-idc 'if) #f)
+(check-equal? (valid-idc 'fn) #f)
+(check-equal? (valid-idc 'let) #f)
+(check-equal? (valid-idc 'in) #f)
