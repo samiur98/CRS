@@ -12,7 +12,6 @@
 
 ;-------------------------------------------------------------------------------------------
 ; Data Definitions:
-;   ExprC, FunDefC
 
 ;Creating the data-types of both the ExprC and the FunDefC
 (define-type ExprC (U NumC IdC AppC LamC))
@@ -29,13 +28,7 @@
 (define-type Value (U FunV NumV PrimV))
 (struct NumV ([n : Real]) #:transparent)
 (struct FunV ([params : (Listof Symbol)] [body : ExprC]) #:transparent)
-(struct PrimV ([s : Symbol]) #:transparent)
-
-;define top-env
-(define top-env (list (Binding '+ (PrimV '+))
-                      (Binding '* (PrimV '*))
-                      (Binding '/ (PrimV '/))
-                      (Binding '- (PrimV '-))))
+(struct PrimV ([fun : (-> (Listof Value) Value)]) #:transparent)
 
 ;-------------------------------------------------------------------------------------------
 
@@ -65,21 +58,40 @@
       (define funval (interp fun env))
       
       (match funval
-        [(PrimV s) (eval-prim s (map (λ ([x : ExprC]) (interp x env)) args))]
+        [(PrimV fun) (fun (map (λ ([x : ExprC]) (interp x env)) args))]
         [(FunV params body)
          (interp body
           (env-extend-all params (map (λ ([x : ExprC]) (interp x env)) args) env))]
         [else (error 'interp "invalid function call")])]))
 
-;-------------------------------------------------------------------------------------------
 
-;evaluates a primitive function to a NumV
-(define (eval-prim [s : Symbol] [args : (Listof Value)]) : Value
+;-------------------------------------------------------------------------------------------
+;define Arithmetic functions
+
+;;adds two NumV's
+(define (add [args : (Listof Value)]) : Value
   (match args
-    [(list (? NumV? a) (? NumV? b))
-     (NumV ((symbol->arith s) (NumV-n a) (NumV-n b)))]
-    [else (error 'eval-prim (string-append "invalid arguments passed to "
-                                           (symbol->string s)))]))
+    [(list (? NumV? a) (? NumV? b)) (NumV (+ (NumV-n a) (NumV-n b)))]
+    [else (error '+ "DXUQ invalid arguments passed to +")]))
+
+;;subtracts two NumV's
+(define (subtract [args : (Listof Value)]) : Value
+  (match args
+    [(list (? NumV? a) (? NumV? b)) (NumV (- (NumV-n a) (NumV-n b)))]
+    [else (error '+ "DXUQ invalid arguments passed to -")]))
+
+;;multiply two NumV's
+(define (multiply [args : (Listof Value)]) : Value
+  (match args
+    [(list (? NumV? a) (? NumV? b)) (NumV (* (NumV-n a) (NumV-n b)))]
+    [else (error '+ "DXUQ invalid arguments passed to *")]))
+
+;;divide two NumV's
+(define (divide [args : (Listof Value)]) : Value
+  (match args
+    [(list (? NumV? a) (? NumV? b)) (NumV (/ (NumV-n a) (NumV-n b)))]
+    [else (error '+ "DXUQ invalid arguments passed to /")]))
+
 
 ;-------------------------------------------------------------------------------------------
 
@@ -107,19 +119,6 @@
 ;;adds a binding to an environment
 (define (env-extend [param : Symbol] [arg : Value] [env : Env]) : Env
   (cons (Binding param arg) env))
-
-;-----------------------------------------------------------------------------------------
-
-;symbol->arith
-;Function that serves as a Lookup table where the input which is a symbol is mapped to an arithmetic function.
-;Input: Symbol / Output: Operator
-(define (symbol->arith [s : Symbol]) : (-> Real Real Real)
-  (match s
-    ['+ +]
-    ['- -]
-    ['* *]
-    ['/ /]
-    [else (error 'symbol->arith "DXUQ invalid input")]))
 
 ;-----------------------------------------------------------------------------------------
 
@@ -152,14 +151,18 @@
 
 
 ;;----------------------------------------------------------------------------------------------
+
+;define top-env for test cases
+(define top-env (list (Binding '+ (PrimV add))
+                      (Binding '* (PrimV multiply))
+                      (Binding '/ (PrimV divide))
+                      (Binding '- (PrimV subtract))))
+
 ;;----------------------------------------------------------------------------------------------
 ;Test Cases
 
 ;Test Cases for the top-interp
-
-
-;Test Cases for the interp-fns
-
+(check-equal? (top-interp '{+ 4 5} top-env) (NumV 9))
 
 ;Test Cases for the interp
 (check-equal? (interp (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env) (NumV 9))
@@ -175,31 +178,30 @@
 (check-exn (regexp (regexp-quote "invalid function call"))
           (lambda () (interp (AppC (NumC 5) (list (NumC 4) (NumC 5))) top-env)))
 
-
 ;Test cases for env-lookup
 (check-equal? (env-lookup 'var (list (Binding 'var (NumV 4)))) (NumV 4))
 (check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
           (lambda () (env-lookup 'x (list (Binding 'y (NumV 4))))))
 
-;Test cases for eval-prim
-(check-equal? (eval-prim '+ (list (NumV 5) (NumV 6))) (NumV 11))
-(check-equal? (eval-prim '/ (list (NumV 100) (NumV 5))) (NumV 20))
-(check-equal? (eval-prim '- (list (NumV 100) (NumV 5))) (NumV 95))
-(check-equal? (eval-prim '* (list (NumV 100) (NumV 5))) (NumV 500))
-(check-exn (regexp (regexp-quote "invalid arguments passed to +"))
-          (lambda () (eval-prim '+ (list (NumV 5) (NumV 6) (NumV 5)))))
-(check-exn (regexp (regexp-quote "invalid arguments passed to -"))
-          (lambda () (eval-prim '- (list (PrimV '+) (NumV 6) (NumV 5)))))
+;Test cases for add
+(check-equal? (add (list (NumV 4) (NumV 10))) (NumV 14))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to +"))
+          (lambda () (add (list (NumV 4) (NumV 10) (NumV 12)))))
 
+;Test cases for subtract
+(check-equal? (subtract (list (NumV 25) (NumV 4))) (NumV 21))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to -"))
+          (lambda () (subtract (list (NumV 4) (NumV 10) (NumV 12)))))
 
-;Test Cases for the symbol->arith
-(check-equal? (symbol->arith '+) +)
-(check-equal? (symbol->arith '-) -)
-(check-equal? (symbol->arith '/) /)
-(check-equal? (symbol->arith '*) *)
-(check-exn (regexp (regexp-quote "DXUQ invalid input"))
-          (lambda () (symbol->arith '%)))
+;Test cases for multiply
+(check-equal? (multiply (list (NumV 5) (NumV 12))) (NumV 60))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to *"))
+          (lambda () (multiply (list (NumV 4) (NumV 10) (NumV 12)))))
 
+;Test cases for divide
+(check-equal? (divide (list (NumV 36) (NumV 6))) (NumV 6))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to /"))
+          (lambda () (divide (list (NumV 4) (NumV 10) (NumV 12)))))
 
 ;Test Cases for the parse
 (check-equal? (parse '{+ 1 2}) (AppC (IdC '+) (list (NumC 1) (NumC 2))))
