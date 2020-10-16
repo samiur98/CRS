@@ -18,17 +18,18 @@
 (struct NumC ([n : Real]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : ExprC] [args : (Listof ExprC)]) #:transparent)
-(struct LamC ([param : (Listof Symbol)] [body : ExprC])  #:transparent)
+(struct LamC ([params : (Listof Symbol)] [body : ExprC])  #:transparent)
 
 ;define Environment
 (define-type Env (Listof Binding))
 (struct Binding ((id : Symbol) (val : Value)) #:transparent)
 
 ;define Value
-(define-type Value (U FunV NumV PrimV))
+(define-type Value (U NumV PrimV CloV))
 (struct NumV ([n : Real]) #:transparent)
-(struct FunV ([params : (Listof Symbol)] [body : ExprC]) #:transparent)
+;(struct FunV ([params : (Listof Symbol)] [body : ExprC]) #:transparent)
 (struct PrimV ([fun : (-> (Listof Value) Value)]) #:transparent)
+(struct CloV ([params : (Listof Symbol)] [body : ExprC] [clo-env : Env]) #:transparent)
 
 ;-------------------------------------------------------------------------------------------
 
@@ -50,7 +51,7 @@
      
      [(IdC s) (env-lookup s env)]
 
-     [(LamC param body) (FunV param body)]
+     [(LamC param body) (CloV param body env)]
      
      [(AppC fun args)
       
@@ -58,10 +59,20 @@
       (define funval (interp fun env))
       
       (match funval
+        
         [(PrimV fun) (fun (map (λ ([x : ExprC]) (interp x env)) args))]
-        [(FunV params body)
-         (interp body
-          (env-extend-all params (map (λ ([x : ExprC]) (interp x env)) args) env))]
+
+        [(CloV params body clo-env)
+
+         ;evaluate arguments (eager)
+         (define arg_vals (map (λ ([x : ExprC]) (interp x env)) args))
+
+         ;extend CloV environment with parameters
+         (define new-env (env-extend-all params arg_vals clo-env))
+         
+         ;evaluate the function body
+         (interp body new-env)]
+        
         [else (error 'interp "invalid function call")])]))
 
 
@@ -133,8 +144,30 @@
                                               "DXUQ invalid identifier: "
                                               (symbol->string id)))])]
    [(list 'fn (list (? symbol? params) ...) body) (LamC (cast params (Listof Symbol)) (parse body))]
+   
+   [(list 'let defs ... 'in body) (desugar-let (cast defs (Listof Sexp)) body)]
+   
    [(list fun args ...) (AppC (parse fun) (map parse args))]
    [else (error 'parse "DXUQ invalid input to parse")]))
+
+
+;desugars a let into an AppC
+(define (desugar-let [defs : (Listof Sexp)] [body : Sexp]) : AppC
+  (AppC (LamC (map get-var-name defs) (parse body))
+        (map (λ ([x : Sexp]) (parse (get-var-value x))) defs)))
+
+;parse a definition, return variable name
+(define (get-var-name [def : Sexp]) : Symbol
+  (match def
+    [(list (? symbol? name) '= value) name]
+    [else (error (string-append "DXUQ invalid variable definition"))]))
+
+;parse a definition, return variable name
+(define (get-var-value [def : Sexp]) : Sexp
+  (match def
+    [(list (? symbol? name) '= value) value]
+    [else (error (string-append "DXUQ invalid variable definition"))]))
+
 
 ;-----------------------------------------------------------------------------------------
 
@@ -163,6 +196,15 @@
 
 ;Test Cases for the top-interp
 (check-equal? (top-interp '{+ 4 5} top-env) (NumV 9))
+(check-equal? (top-interp '{{fn {x y} {* x y}} 3 7} top-env) (NumV 21))
+(check-equal? (top-interp '{{fn {x add4} {add4 x}} 20 {fn {x} {+ x 4}}} top-env) (NumV 24))
+(check-equal? (top-interp
+               '{{fn {add1 dotwice} {dotwice add1 14}} {fn {x} {+ x 1}} {fn {f a} {f {f a}}}}
+               top-env) (NumV 16))
+(check-equal? (top-interp '{{fn {y} {{fn {fun y} {fun}} {fn {} y} 100}} 1} top-env) (NumV 1))
+(check-equal? (top-interp '{let {x = 10} {y = 2} in {* x y}} top-env) (NumV 20))
+(check-equal? (top-interp '{let {x = {/ 144 12}} {y = {* 2 3}} in {* x y}} top-env) (NumV 72))
+
 
 ;Test Cases for the interp
 (check-equal? (interp (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env) (NumV 9))
@@ -210,10 +252,29 @@
 (check-equal? (parse '{{fn {x y} {* x y}} 2 16})
               (AppC (LamC (list 'x 'y) (AppC (IdC '*) (list (IdC 'x) (IdC 'y))))
                     (list (NumC 2) (NumC 16))))
+(check-equal? (parse '{let {z = {+ 9 14}} {y = 98} in {+ z y}})
+              (AppC (LamC '(z y) (AppC (IdC '+) (list (IdC 'z) (IdC 'y))))
+                    (list (AppC (IdC '+) (list (NumC 9) (NumC 14))) (NumC 98))))
 (check-exn (regexp (regexp-quote "DXUQ invalid identifier: in"))
           (lambda () (parse '{{fn {in y} {* in y}} 2 16})))
 (check-exn (regexp (regexp-quote "DXUQ invalid input to parse"))
           (lambda () (parse '{})))
+
+;Test Cases for desugar-let
+(check-equal? (desugar-let (list '(z = 4)) '(+ z 1))
+              (AppC (LamC '(z) (AppC (IdC '+) (list (IdC 'z) (NumC 1))))
+                    (list (NumC 4))))
+
+;Test Cases for get-var-name
+(check-equal? (get-var-name '(var = 45)) 'var)
+(check-exn (regexp (regexp-quote "DXUQ invalid variable definition"))
+          (lambda () (get-var-name '(var == 45))))
+
+;Test Cases for get-var-value
+(check-equal? (get-var-value '(var = 45)) '45)
+(check-equal? (get-var-value '(var = {* 4 5})) '(* 4 5))
+(check-exn (regexp (regexp-quote "DXUQ invalid variable definition"))
+          (lambda () (get-var-value '(var == 45))))
 
 ;Test Cases for the valid
 (check-equal? (valid-idc 'x) #t)
