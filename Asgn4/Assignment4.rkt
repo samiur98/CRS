@@ -80,7 +80,7 @@
          ;evaluate the function body
          (interp body new-env)]
         
-        [else (error 'interp "invalid function call")])]))
+        [else (error 'interp "DXUQ Invalid function call")])]))
 
 
 ;-------------------------------------------------------------------------------------------
@@ -187,6 +187,15 @@
     ['fn #f]
     [else #t]))
 
+;;----------------------------------------------------------------------------------------------
+
+; Given a DXUQ value returns a string
+(define (serialize [v : Value]) : String
+  (match v
+    [(? NumV? a) (number->string (NumV-n a))]
+    [(? BoolV? b) (cond
+                    [(equal? (BoolV-b b) #t) "true"]
+                    [else "false"])]))
 
 ;;----------------------------------------------------------------------------------------------
 
@@ -232,8 +241,10 @@
                       (LamC (list 'x 'y)
                             (AppC (IdC '+) (list (IdC 'x) (IdC 'y)))) (list (NumC 25)(NumC 5)))
                       top-env) (NumV 30))
-(check-exn (regexp (regexp-quote "invalid function call"))
+(check-exn (regexp (regexp-quote "DXUQ Invalid function call"))
           (lambda () (interp (AppC (NumC 5) (list (NumC 4) (NumC 5))) top-env)))
+(check-exn (regexp (regexp-quote "DXUQ provided test was not a boolean"))
+          (lambda () (interp (IfC (NumC 10) (NumC 4) (NumC 8)) top-env)))
 
 ;Test cases for env-lookup
 (check-equal? (env-lookup 'var (list (Binding 'var (NumV 4)))) (NumV 4))
@@ -303,3 +314,8 @@
 (check-equal? (valid-idc 'fn) #f)
 (check-equal? (valid-idc 'let) #f)
 (check-equal? (valid-idc 'in) #f)
+
+; Test Cases for serialize
+(check-equal? (serialize (NumV 10)) "10")
+(check-equal? (serialize (BoolV #t)) "true")
+(check-equal? (serialize (BoolV #f)) "false")
