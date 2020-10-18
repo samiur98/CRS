@@ -14,21 +14,19 @@
 ; Data Definitions:
 
 ;Creating the data-types of both the ExprC and the FunDefC
-(define-type ExprC (U NumC IdC AppC LamC IfC))
+(define-type ExprC (U NumC IdC AppC LamC))
 (struct NumC ([n : Real]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : ExprC] [args : (Listof ExprC)]) #:transparent)
 (struct LamC ([params : (Listof Symbol)] [body : ExprC])  #:transparent)
-(struct IfC ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
 
 ;define Environment
 (define-type Env (Listof Binding))
 (struct Binding ((id : Symbol) (val : Value)) #:transparent)
 
 ;define Value
-(define-type Value (U NumV PrimV CloV BoolV))
+(define-type Value (U NumV PrimV CloV))
 (struct NumV ([n : Real]) #:transparent)
-(struct BoolV ([b : Boolean]) #:transparent)
 ;(struct FunV ([params : (Listof Symbol)] [body : ExprC]) #:transparent)
 (struct PrimV ([fun : (-> (Listof Value) Value)]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [clo-env : Env]) #:transparent)
@@ -52,11 +50,6 @@
      [(NumC n) (NumV n)]
      
      [(IdC s) (env-lookup s env)]
-
-     [(IfC test then else) (match (interp test env)
-                             [(BoolV #t) (interp then env)]
-                             [(BoolV #f) (interp else env)]
-                             [_ (error 'interp "DXUQ provided test was not a boolean")])]
 
      [(LamC param body) (CloV param body env)]
      
@@ -109,6 +102,8 @@
   (match args
     [(list (? NumV? a) (? NumV? b)) (NumV (/ (NumV-n a) (NumV-n b)))]
     [else (error '+ "DXUQ invalid arguments passed to /")]))
+
+
 ;-------------------------------------------------------------------------------------------
 
 ;;grabs the value of an id in a given environment
@@ -151,7 +146,7 @@
    [(list 'fn (list (? symbol? params) ...) body) (LamC (cast params (Listof Symbol)) (parse body))]
    
    [(list 'let defs ... 'in body) (desugar-let (cast defs (Listof Sexp)) body)]
-   [(list 'if test then else) (IfC (parse test) (parse then) (parse else))]
+   
    [(list fun args ...) (AppC (parse fun) (map parse args))]
    [else (error 'parse "DXUQ invalid input to parse")]))
 
@@ -194,9 +189,7 @@
 (define top-env (list (Binding '+ (PrimV add))
                       (Binding '* (PrimV multiply))
                       (Binding '/ (PrimV divide))
-                      (Binding '- (PrimV subtract))
-                      (Binding 'true (BoolV #t))
-                      (Binding 'false (BoolV #f))))
+                      (Binding '- (PrimV subtract))))
 
 ;;----------------------------------------------------------------------------------------------
 ;Test Cases
@@ -211,20 +204,12 @@
 (check-equal? (top-interp '{{fn {y} {{fn {fun y} {fun}} {fn {} y} 100}} 1} top-env) (NumV 1))
 (check-equal? (top-interp '{let {x = 10} {y = 2} in {* x y}} top-env) (NumV 20))
 (check-equal? (top-interp '{let {x = {/ 144 12}} {y = {* 2 3}} in {* x y}} top-env) (NumV 72))
-(check-equal? (top-interp 'true top-env) (BoolV #t))
-(check-equal? (top-interp 'false top-env) (BoolV #f))
-(check-equal? (top-interp '{if true 10 20} top-env) (NumV 10))
-(check-equal? (top-interp '{if false 10 20} top-env) (NumV 20))
+
 
 ;Test Cases for the interp
 (check-equal? (interp (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env) (NumV 9))
 (check-equal? (interp (AppC (IdC '-) (list (NumC 10) (NumC 5))) top-env) (NumV 5))
 (check-equal? (interp (AppC (IdC '*) (list (NumC 10) (NumC 5))) top-env) (NumV 50))
-(check-equal? (interp (IdC 'true) top-env) (BoolV #t))
-(check-equal? (interp (IdC 'false) top-env) (BoolV #f))
-(check-equal? (interp (IfC (IdC 'true) (NumC 10) (NumC 20)) top-env) (NumV 10))
-(check-equal? (interp (IfC (IdC 'false) (NumC 10) (NumC 20)) top-env) (NumV 20))
-
 (check-equal? (interp (AppC
                        (LamC (list 'x) (AppC (IdC '+) (list (IdC 'x) (NumC 1)))) (list (NumC 5)))
                       top-env) (NumV 6))
@@ -237,8 +222,6 @@
 
 ;Test cases for env-lookup
 (check-equal? (env-lookup 'var (list (Binding 'var (NumV 4)))) (NumV 4))
-(check-equal? (env-lookup 'true top-env) (BoolV #t))
-(check-equal? (env-lookup 'false top-env) (BoolV #f))
 (check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
           (lambda () (env-lookup 'x (list (Binding 'y (NumV 4))))))
 
@@ -263,9 +246,6 @@
           (lambda () (divide (list (NumV 4) (NumV 10) (NumV 12)))))
 
 ;Test Cases for the parse
-(check-equal? (parse 'true) (IdC 'true))
-(check-equal? (parse 'false) (IdC 'false))
-(check-equal? (parse '{if true 1 2}) (IfC (IdC 'true) (NumC 1) (NumC 2)))
 (check-equal? (parse '{+ 1 2}) (AppC (IdC '+) (list (NumC 1) (NumC 2))))
 (check-equal? (parse '{fn {x y} {* x y}})
               (LamC (list 'x 'y) (AppC (IdC '*) (list (IdC 'x) (IdC 'y)))))
