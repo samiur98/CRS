@@ -1,18 +1,10 @@
 ;Assignment 4: DXUQ4 Parser and Interpreter with multiple arguments.
 
 ;The project has been finished. All functions have been implemented and they
-<<<<<<< HEAD
 ;have been tested by suites of test cases that test all main functions as well
 ;as helper functions.
 
 #lang typed/racket
-=======
-;have been tested by a suite of test cases that test all main functions as well
-;as helper functions.
-
-#lang typed/racket
-
->>>>>>> 722493c6b099114cee5c88681ba2e2eebc65dc48
 (require typed/rackunit)
 
 (define EPSILON 1e-05)
@@ -43,25 +35,13 @@
 
 ;-------------------------------------------------------------------------------------------
 
-<<<<<<< HEAD
 ;;Given an SExpression, fun-sexps returns a Real by evaluating the expression
-=======
-;;top-interp
-;;Given an SExpression, fun-sexps returns a Real by evaluating the expression
-;Input: Sexp / Output: Real
->>>>>>> 722493c6b099114cee5c88681ba2e2eebc65dc48
 (define (top-interp [sexps : Sexp]) : String
  (serialize (interp (parse sexps) top-env)))
 
 ;-----------------------------------------------------------------------------------------
 
-<<<<<<< HEAD
 ;;Given an ExprC and a list of FunDefC structrs, interp evaluates the expression and returns a real
-=======
-;interp
-;;Given an ExprC and a list of FunDefC structrs, interp evaluates the expression and returns a real
-;Input: ExprC/List of FunDefC structs / Output: Real
->>>>>>> 722493c6b099114cee5c88681ba2e2eebc65dc48
 (define (interp [a : ExprC] [env : Env]) : Value
    (match a
      
@@ -183,13 +163,7 @@
 
 ;-----------------------------------------------------------------------------------------
 
-<<<<<<< HEAD
 ;Given an SExpression, parse returns an ExprC struct representing a parsed version of the SExpression
-=======
-;parse
-;Given an SExpression, parse returns an ExprC struct representing a parsed version of the SExpression
-;Input: Sexp / Output: ExprC Struct
->>>>>>> 722493c6b099114cee5c88681ba2e2eebc65dc48
 (define (parse [s : Sexp]) : ExprC
  (match s
    [(? real? a) (NumC a)]
@@ -242,13 +216,7 @@
 
 ;-----------------------------------------------------------------------------------------
 
-<<<<<<< HEAD
 ;Given a symbol, valid-idc returns a boolean representing whether the symbol is a valid argument to BinOp
-=======
-;valid-idc
-;Given a symbol, valid-idc returns a boolean representing whether the symbol is a valid argument to BinOp
-;Input: Symbol / Output: Boolean
->>>>>>> 722493c6b099114cee5c88681ba2e2eebc65dc48
 (define (valid-idc [id : Sexp]) : Boolean
   (match id
     ['let #f]
@@ -454,8 +422,3 @@
                (CloV '(x y)
                      (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env))
               "#<procedure>")
-<<<<<<< HEAD
-=======
-
-
->>>>>>> 722493c6b099114cee5c88681ba2e2eebc65dc48
