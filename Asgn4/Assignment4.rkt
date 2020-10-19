@@ -14,22 +14,23 @@
 ; Data Definitions:
 
 ;Creating the data-types of both the ExprC and the FunDefC
-(define-type ExprC (U NumC IdC AppC LamC IfC))
+(define-type ExprC (U NumC IdC AppC LamC IfC StringC))
 (struct NumC ([n : Real]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : ExprC] [args : (Listof ExprC)]) #:transparent)
 (struct LamC ([params : (Listof Symbol)] [body : ExprC])  #:transparent)
 (struct IfC ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
+(struct StringC ([str : String]) #:transparent)
 
 ;define Environment
 (define-type Env (Listof Binding))
 (struct Binding ((id : Symbol) (val : Value)) #:transparent)
 
 ;define Value
-(define-type Value (U NumV PrimV CloV BoolV))
+(define-type Value (U NumV PrimV CloV BoolV StringV))
 (struct NumV ([n : Real]) #:transparent)
 (struct BoolV ([b : Boolean]) #:transparent)
-;(struct FunV ([params : (Listof Symbol)] [body : ExprC]) #:transparent)
+(struct StringV ([str : String]) #:transparent)
 (struct PrimV ([fun : (-> (Listof Value) Value)]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [clo-env : Env]) #:transparent)
 
@@ -38,8 +39,8 @@
 ;;top-interp
 ;;Given an SExpression, fun-sexps returns a Real by evaluating the expression
 ;Input: Sexp / Output: Real
-(define (top-interp [sexps : Sexp] [topEnv : Env]) : Value
- (interp (parse sexps) topEnv))
+(define (top-interp [sexps : Sexp]) : String
+ (serialize (interp (parse sexps) top-env)))
 
 ;-----------------------------------------------------------------------------------------
 
@@ -50,13 +51,15 @@
    (match a
      
      [(NumC n) (NumV n)]
+
+     [(StringC str) (StringV str)]
      
      [(IdC s) (env-lookup s env)]
 
      [(IfC test then else) (match (interp test env)
                              [(BoolV #t) (interp then env)]
                              [(BoolV #f) (interp else env)]
-                             [_ (error 'interp "DXUQ provided test was not a boolean")])]
+                             [else (error 'interp "DXUQ if condition is not a boolean")])]
 
      [(LamC param body) (CloV param body env)]
      
@@ -71,6 +74,11 @@
 
         [(CloV params body clo-env)
 
+         ;;verify correct number of arguments
+         (cond
+           [(not (equal? (length params) (length args)))
+            (error 'interp "DXUQ incorrect number of arguments passed to function")])
+
          ;evaluate arguments (eager)
          (define arg_vals (map (λ ([x : ExprC]) (interp x env)) args))
 
@@ -80,8 +88,7 @@
          ;evaluate the function body
          (interp body new-env)]
         
-        [else (error 'interp "DXUQ Invalid function call")])]))
-
+        [else (error 'interp "DXUQ invalid function call")])]))
 
 ;-------------------------------------------------------------------------------------------
 ;define Arithmetic functions
@@ -107,8 +114,31 @@
 ;;divide two NumV's
 (define (divide [args : (Listof Value)]) : Value
   (match args
-    [(list (? NumV? a) (? NumV? b)) (NumV (/ (NumV-n a) (NumV-n b)))]
+    [(list (NumV left) (NumV right))
+     (cond
+       [(equal? right 0) (error 'divide
+                                (string-append "DXUQ division by zero: " (number->string left) " / 0"))]
+       [(NumV (/ left right))])]
     [else (error '+ "DXUQ invalid arguments passed to /")]))
+
+;;compare two NumV's with <=
+(define (leq [args : (Listof Value)]) : Value
+  (match args
+    [(list (NumV left) (NumV right)) (BoolV (<= left right))]
+    [else (error '+ "DXUQ invalid arguments passed to <=")]))
+
+;;compare two NumV's with equal?
+(define (eq [args : (Listof Value)]) : Value
+  (match args
+    [(list left right) (BoolV (equal? left right))]
+    [else (error '+ "DXUQ invalid arguments passed to equal?")]))
+
+;;signals a user error
+(define (user-error [args : (Listof Value)]) : Value
+  (match args
+    [(list arg) (error 'user-error (string-append "DXUQ " (serialize arg)))]
+    [else (error "DXUQ incorrect number of arguments passed to error")]))
+
 ;-------------------------------------------------------------------------------------------
 
 ;;grabs the value of an id in a given environment
@@ -144,20 +174,30 @@
 (define (parse [s : Sexp]) : ExprC
  (match s
    [(? real? a) (NumC a)]
-   [(? symbol? id) (cond [(valid-idc id) (IdC id)]
-                         [else (error 'parse (string-append
-                                              "DXUQ invalid identifier: "
-                                              (symbol->string id)))])]
-   [(list 'fn (list (? symbol? params) ...) body) (LamC (cast params (Listof Symbol)) (parse body))]
-   
+   [(? string? str) (StringC str)]
+   [(? symbol? id)
+    (cond
+      [(valid-idc id) (IdC id)]
+      [else (error 'parse (string-append "DXUQ invalid identifier: " (symbol->string id)))])]
+   [(list 'fn (list (? symbol? params) ...) body)
+    (LamC (validate-params (cast params (Listof Symbol))) (parse body))]  
    [(list 'let defs ... 'in body) (desugar-let (cast defs (Listof Sexp)) body)]
-   [(list 'if test then else) (IfC (parse test) (parse then) (parse else))]
+   [(list 'if exprs ...)
+    (cond
+      [(equal? (length exprs) 3)
+       (IfC (parse (first exprs)) (parse (second exprs)) (parse (third exprs)))]
+      [else (error 'parse "DXUQ invalid syntax for if")])]
    [(list fun args ...) (AppC (parse fun) (map parse args))]
    [else (error 'parse "DXUQ invalid input to parse")]))
 
 
 ;desugars a let into an AppC
 (define (desugar-let [defs : (Listof Sexp)] [body : Sexp]) : AppC
+  (define var-names (map get-var-name defs))
+  (define dup (check-duplicates var-names))
+  (cond
+    [(not (equal? dup #f))
+     (error (string-append "DXUQ duplicate variable definition in let: " (~a dup)))])
   (AppC (LamC (map get-var-name defs) (parse body))
         (map (λ ([x : Sexp]) (parse (get-var-value x))) defs)))
 
@@ -167,11 +207,18 @@
     [(list (? symbol? name) '= value) name]
     [else (error (string-append "DXUQ invalid variable definition"))]))
 
-;parse a definition, return variable name
+;parse a definition, return variable value
 (define (get-var-value [def : Sexp]) : Sexp
   (match def
     [(list (? symbol? name) '= value) value]
     [else (error (string-append "DXUQ invalid variable definition"))]))
+
+;verifies a function has no duplicate parameters, returns the list if no duplicates exist
+(define (validate-params [params : (Listof Symbol)]) : (Listof Symbol)
+  (define dup (check-duplicates params))
+  (match dup
+    [#f params]
+    [else (error (string-append "DXUQ duplicate parameter: " (~a dup)))]))
 
 
 ;-----------------------------------------------------------------------------------------
@@ -185,6 +232,8 @@
     ['in #f]
     ['if #f]
     ['fn #f]
+    ['vars #f]
+    ['lam #f]
     [else #t]))
 
 ;;----------------------------------------------------------------------------------------------
@@ -192,38 +241,56 @@
 ; Given a DXUQ value returns a string
 (define (serialize [v : Value]) : String
   (match v
-    [(? NumV? a) (number->string (NumV-n a))]
-    [(? BoolV? b) (cond
-                    [(equal? (BoolV-b b) #t) "true"]
+    [(NumV n) (~v n)]
+    [(StringV str) str]
+    [(CloV params body env) "#<procedure>"]
+    [(PrimV fun) "#<primop>"]
+    [(BoolV b) (cond
+                    [(equal? b #t) "true"]
                     [else "false"])]))
 
 ;;----------------------------------------------------------------------------------------------
 
-;define top-env for test cases
+;define top-env
 (define top-env (list (Binding '+ (PrimV add))
                       (Binding '* (PrimV multiply))
                       (Binding '/ (PrimV divide))
                       (Binding '- (PrimV subtract))
+                      (Binding '<= (PrimV leq))
+                      (Binding 'equal? (PrimV eq))
+                      (Binding 'error (PrimV user-error))
                       (Binding 'true (BoolV #t))
                       (Binding 'false (BoolV #f))))
 
 ;;----------------------------------------------------------------------------------------------
 ;Test Cases
 
-;Test Cases for the top-interp
-(check-equal? (top-interp '{+ 4 5} top-env) (NumV 9))
-(check-equal? (top-interp '{{fn {x y} {* x y}} 3 7} top-env) (NumV 21))
-(check-equal? (top-interp '{{fn {x add4} {add4 x}} 20 {fn {x} {+ x 4}}} top-env) (NumV 24))
+;Test Cases for the top-interp 
+(check-equal? (top-interp '{+ 4 5}) "9")
+(check-equal? (top-interp '{{fn {x y} {* x y}} 3 7}) "21")
+(check-equal? (top-interp '{{fn {x add4} {add4 x}} 20 {fn {x} {+ x 4}}}) "24")
 (check-equal? (top-interp
-               '{{fn {add1 dotwice} {dotwice add1 14}} {fn {x} {+ x 1}} {fn {f a} {f {f a}}}}
-               top-env) (NumV 16))
-(check-equal? (top-interp '{{fn {y} {{fn {fun y} {fun}} {fn {} y} 100}} 1} top-env) (NumV 1))
-(check-equal? (top-interp '{let {x = 10} {y = 2} in {* x y}} top-env) (NumV 20))
-(check-equal? (top-interp '{let {x = {/ 144 12}} {y = {* 2 3}} in {* x y}} top-env) (NumV 72))
-(check-equal? (top-interp 'true top-env) (BoolV #t))
-(check-equal? (top-interp 'false top-env) (BoolV #f))
-(check-equal? (top-interp '{if true 10 20} top-env) (NumV 10))
-(check-equal? (top-interp '{if false 10 20} top-env) (NumV 20))
+               '{{fn {add1 dotwice} {dotwice add1 14}}
+                 {fn {x} {+ x 1}} {fn {f a} {f {f a}}}}) "16")
+(check-equal? (top-interp '{{fn {y} {{fn {fun y} {fun}} {fn {} y} 100}} 1}) "1")
+(check-equal? (top-interp '{let {x = 10} {y = 2} in {* x y}}) "20")
+(check-equal? (top-interp '{let {x = {/ 144 12}} {y = {* 2 3}} in {* x y}}) "72")
+(check-equal? (top-interp 'true) "true")
+(check-equal? (top-interp 'false) "false")
+(check-equal? (top-interp '{if true 10 20}) "10")
+(check-equal? (top-interp '{if false 10 20}) "20")
+(check-equal? (top-interp '"testing") "testing")
+(check-equal? (top-interp '{<= 10 20}) "true")
+(check-equal? (top-interp '{equal? 10 20}) "false")
+(check-equal? (top-interp '{equal? 20 20}) "true")
+(check-exn (regexp (regexp-quote "DXUQ duplicate parameter: x"))
+          (lambda () (top-interp '{{fn {x x} {+ x x}} 20 30})))
+(check-exn (regexp (regexp-quote "DXUQ invalid syntax for if"))
+          (lambda () (top-interp '{if {equal? 10 10} 5})))
+(check-exn (regexp (regexp-quote "DXUQ incorrect number of arguments passed to function"))
+          (lambda () (top-interp '{{fn {x} {+ x 1}} 20 20})))
+(check-exn (regexp (regexp-quote "DXUQ invalid function call"))
+          (lambda () (top-interp '{{+ 5 5} 20 20})))
 
 ;Test Cases for the interp
 (check-equal? (interp (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env) (NumV 9))
@@ -231,9 +298,9 @@
 (check-equal? (interp (AppC (IdC '*) (list (NumC 10) (NumC 5))) top-env) (NumV 50))
 (check-equal? (interp (IdC 'true) top-env) (BoolV #t))
 (check-equal? (interp (IdC 'false) top-env) (BoolV #f))
+(check-equal? (interp (StringC '"test string") top-env) (StringV "test string"))
 (check-equal? (interp (IfC (IdC 'true) (NumC 10) (NumC 20)) top-env) (NumV 10))
 (check-equal? (interp (IfC (IdC 'false) (NumC 10) (NumC 20)) top-env) (NumV 20))
-
 (check-equal? (interp (AppC
                        (LamC (list 'x) (AppC (IdC '+) (list (IdC 'x) (NumC 1)))) (list (NumC 5)))
                       top-env) (NumV 6))
@@ -241,10 +308,16 @@
                       (LamC (list 'x 'y)
                             (AppC (IdC '+) (list (IdC 'x) (IdC 'y)))) (list (NumC 25)(NumC 5)))
                       top-env) (NumV 30))
-(check-exn (regexp (regexp-quote "DXUQ Invalid function call"))
+(check-exn (regexp (regexp-quote "DXUQ invalid function call"))
           (lambda () (interp (AppC (NumC 5) (list (NumC 4) (NumC 5))) top-env)))
-(check-exn (regexp (regexp-quote "DXUQ provided test was not a boolean"))
+(check-exn (regexp (regexp-quote "DXUQ if condition is not a boolean"))
           (lambda () (interp (IfC (NumC 10) (NumC 4) (NumC 8)) top-env)))
+(check-exn (regexp (regexp-quote "DXUQ division by zero: 10 / 0"))
+          (lambda () (interp (AppC (IdC '/) (list (NumC 10) (NumC 0))) top-env)))
+(check-exn (regexp (regexp-quote "DXUQ division by zero: 20 / 0"))
+          (lambda () (interp (AppC (IdC '/)
+                                   (list (NumC 20)
+                                         (AppC (IdC '-) (list (NumC 25) (NumC 25))))) top-env)))
 
 ;Test cases for env-lookup
 (check-equal? (env-lookup 'var (list (Binding 'var (NumV 4)))) (NumV 4))
@@ -273,9 +346,34 @@
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to /"))
           (lambda () (divide (list (NumV 4) (NumV 10) (NumV 12)))))
 
+;Test cases for leq
+(check-equal? (leq (list (NumV 5) (NumV 12))) (BoolV #t))
+(check-equal? (leq (list (NumV 14) (NumV 12))) (BoolV #f))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to <="))
+          (lambda () (leq (list (NumV 4) (NumV 10) (NumV 12)))))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to <="))
+          (lambda () (leq (list (NumV 4) (NumV 10) (BoolV #t)))))
+
+;Test cases for eq
+(check-equal? (eq (list (NumV 12) (NumV 12))) (BoolV #t))
+(check-equal? (eq (list (StringV "test1") (StringV "test1"))) (BoolV #t))
+(check-equal? (eq (list (BoolV #t) (BoolV #t))) (BoolV #t))
+(check-equal? (eq (list (StringV "test1") (StringV "test2"))) (BoolV #f))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to equal?"))
+          (lambda () (eq (list (NumV 4) (NumV 10) (NumV 12)))))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to equal?"))
+          (lambda () (eq (list (NumV 10) (NumV 10) (NumV 10)))))
+
+;Test cases for error
+(check-exn (regexp (regexp-quote "user-error: DXUQ bad data"))
+          (lambda () (user-error (list (StringV "bad data")))))
+(check-exn (regexp (regexp-quote "DXUQ incorrect number of arguments passed to error"))
+          (lambda () (user-error (list (StringV "bad data") (StringV "test")))))
+
 ;Test Cases for the parse
 (check-equal? (parse 'true) (IdC 'true))
 (check-equal? (parse 'false) (IdC 'false))
+(check-equal? (parse '"test string") (StringC "test string"))
 (check-equal? (parse '{if true 1 2}) (IfC (IdC 'true) (NumC 1) (NumC 2)))
 (check-equal? (parse '{+ 1 2}) (AppC (IdC '+) (list (NumC 1) (NumC 2))))
 (check-equal? (parse '{fn {x y} {* x y}})
@@ -295,11 +393,18 @@
 (check-equal? (desugar-let (list '(z = 4)) '(+ z 1))
               (AppC (LamC '(z) (AppC (IdC '+) (list (IdC 'z) (NumC 1))))
                     (list (NumC 4))))
+(check-exn (regexp (regexp-quote "DXUQ duplicate variable definition in let: z"))
+          (lambda () (desugar-let (list '(z = 4) '(z = 5)) '(+ z 1))))
 
 ;Test Cases for get-var-name
 (check-equal? (get-var-name '(var = 45)) 'var)
 (check-exn (regexp (regexp-quote "DXUQ invalid variable definition"))
           (lambda () (get-var-name '(var == 45))))
+
+;Test Cases for validate-params
+(check-equal? (validate-params '(x y z b)) '(x y z b))
+(check-exn (regexp (regexp-quote "DXUQ duplicate parameter: x"))
+          (lambda () (validate-params '(x y z x))))
 
 ;Test Cases for get-var-value
 (check-equal? (get-var-value '(var = 45)) '45)
@@ -314,8 +419,17 @@
 (check-equal? (valid-idc 'fn) #f)
 (check-equal? (valid-idc 'let) #f)
 (check-equal? (valid-idc 'in) #f)
+(check-equal? (valid-idc 'vars) #f)
+(check-equal? (valid-idc 'lam) #f)
 
-; Test Cases for serialize
+;Test Cases for serialize
 (check-equal? (serialize (NumV 10)) "10")
 (check-equal? (serialize (BoolV #t)) "true")
 (check-equal? (serialize (BoolV #f)) "false")
+(check-equal? (serialize (PrimV add)) "#<primop>")
+(check-equal? (serialize
+               (CloV '(x y)
+                     (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env))
+              "#<procedure>")
+
+
