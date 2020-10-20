@@ -85,6 +85,19 @@
         
         [else (error 'interp (string-append "DXUQ invalid function call: " (~v funval)))])]))
 
+;;----------------------------------------------------------------------------------------------
+
+;;Serializes a DXUQ value to its string representation
+(define (serialize [v : Value]) : String
+  (match v
+    [(NumV n) (~v n)]
+    [(StringV str) str]
+    [(CloV params body env) "#<procedure>"]
+    [(PrimV fun) "#<primop>"]
+    [(BoolV b) (cond
+                    [(equal? b #t) "true"]
+                    [else "false"])]))
+
 ;-------------------------------------------------------------------------------------------
 ;define Arithmetic functions
 
@@ -227,18 +240,6 @@
     ['lam #f]
     [else #t]))
 
-;;----------------------------------------------------------------------------------------------
-
-;;Serializes a DXUQ value to its string representation
-(define (serialize [v : Value]) : String
-  (match v
-    [(NumV n) (~v n)]
-    [(StringV str) str]
-    [(CloV params body env) "#<procedure>"]
-    [(PrimV fun) "#<primop>"]
-    [(BoolV b) (cond
-                    [(equal? b #t) "true"]
-                    [else "false"])]))
 
 ;;----------------------------------------------------------------------------------------------
 
