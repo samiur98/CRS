@@ -35,13 +35,13 @@
 
 ;-------------------------------------------------------------------------------------------
 
-;;Given an SExpression, fun-sexps returns a Real by evaluating the expression
+;;Evaluates a given an S-Expression as a DXUQ4 expression, returns a value as a string
 (define (top-interp [sexps : Sexp]) : String
  (serialize (interp (parse sexps) top-env)))
 
 ;-----------------------------------------------------------------------------------------
 
-;;Given an ExprC and a list of FunDefC structrs, interp evaluates the expression and returns a real
+;;Evaluates an ExprC given an Environment, returns a Value
 (define (interp [a : ExprC] [env : Env]) : Value
    (match a
      
@@ -83,56 +83,56 @@
          ;evaluate the function body
          (interp body new-env)]
         
-        [else (error 'interp "DXUQ invalid function call")])]))
+        [else (error 'interp (string-append "DXUQ invalid function call: " (~v funval)))])]))
 
 ;-------------------------------------------------------------------------------------------
 ;define Arithmetic functions
 
-;;adds two NumV's
+;;primitive addition - adds two NumV's together
 (define (add [args : (Listof Value)]) : Value
   (match args
     [(list (? NumV? a) (? NumV? b)) (NumV (+ (NumV-n a) (NumV-n b)))]
-    [else (error '+ "DXUQ invalid arguments passed to +")]))
+    [else (error '+ (string-append "DXUQ invalid arguments passed to +: " (~v args)))]))
 
-;;subtracts two NumV's
+;;primitive subtraction - subtracts two NumV's
 (define (subtract [args : (Listof Value)]) : Value
   (match args
     [(list (? NumV? a) (? NumV? b)) (NumV (- (NumV-n a) (NumV-n b)))]
-    [else (error '+ "DXUQ invalid arguments passed to -")]))
+    [else (error '+ (string-append "DXUQ invalid arguments passed to -: " (~v args)))]))
 
-;;multiply two NumV's
+;;prmitive multiplication - multiply two NumV's
 (define (multiply [args : (Listof Value)]) : Value
   (match args
     [(list (? NumV? a) (? NumV? b)) (NumV (* (NumV-n a) (NumV-n b)))]
-    [else (error '+ "DXUQ invalid arguments passed to *")]))
+    [else (error '+ (string-append "DXUQ invalid arguments passed to *: " (~v args)))]))
 
-;;divide two NumV's
+;;primitive division - divide two NumV's
 (define (divide [args : (Listof Value)]) : Value
   (match args
     [(list (NumV left) (NumV right))
      (cond
        [(equal? right 0) (error 'divide
-                                (string-append "DXUQ division by zero: " (number->string left) " / 0"))]
+                                (string-append "DXUQ division by zero: " (~v left) " / 0"))]
        [(NumV (/ left right))])]
-    [else (error '+ "DXUQ invalid arguments passed to /")]))
+    [else (error '+ (string-append "DXUQ invalid arguments passed to /: " (~v args)))]))
 
-;;compare two NumV's with <=
+;;primitive less than or equal to - compare two NumV's with <=
 (define (leq [args : (Listof Value)]) : Value
   (match args
     [(list (NumV left) (NumV right)) (BoolV (<= left right))]
-    [else (error '+ "DXUQ invalid arguments passed to <=")]))
+    [else (error '+ (string-append "DXUQ invalid arguments passed to <=: " (~v args)))]))
 
-;;compare two NumV's with equal?
+;;primitive equality - compare two NumV's with equal?
 (define (eq [args : (Listof Value)]) : Value
   (match args
     [(list left right) (BoolV (equal? left right))]
-    [else (error '+ "DXUQ invalid arguments passed to equal?")]))
+    [else (error '+ (string-append "DXUQ invalid arguments passed to equal?: " (~v args)))]))
 
 ;;signals a user error
 (define (user-error [args : (Listof Value)]) : Value
   (match args
     [(list arg) (error 'user-error (string-append "DXUQ " (serialize arg)))]
-    [else (error "DXUQ incorrect number of arguments passed to error")]))
+    [else (error (string-append "DXUQ invalid arguments passed to error: " (~v args)))]))
 
 ;-------------------------------------------------------------------------------------------
 
@@ -140,30 +140,30 @@
 (define (env-lookup [id : Symbol] [env : Env]) : Value
   (cond
     [(empty? env)
-     (error 'env-lookup (string-append "DXUQ unbound identifier: " (symbol->string id)))]
+     (error 'env-lookup (string-append "DXUQ unbound identifier: " (~a id)))]
     [(equal? id (Binding-id (first env))) (Binding-val (first env))]
     [else (env-lookup id (rest env))]))
 
 ;-------------------------------------------------------------------------------------------
 
-;;adds a list of parameters with a list of arguments to an env
-(define (env-extend-all [params : (Listof Symbol)] [args : (Listof Value)] [env : Env]) : Env
+;;Given a list of identifiers and a list of values, adds each identifier-value pair to an env
+(define (env-extend-all [ids : (Listof Symbol)] [args : (Listof Value)] [env : Env]) : Env
   (cond
-    [(empty? params) env]
+    [(empty? ids) env]
     [else (env-extend-all
-           (rest params)
+           (rest ids)
            (rest args)
-           (env-extend (first params) (first args) env))]))
+           (env-extend (first ids) (first args) env))]))
 
 ;-------------------------------------------------------------------------------------------
 
-;;adds a binding to an environment
+;;Adds a single binding to an environment
 (define (env-extend [param : Symbol] [arg : Value] [env : Env]) : Env
   (cons (Binding param arg) env))
 
 ;-----------------------------------------------------------------------------------------
 
-;Given an SExpression, parse returns an ExprC struct representing a parsed version of the SExpression
+;;Given an SExpression, parse returns an ExprC struct representing the SExpression
 (define (parse [s : Sexp]) : ExprC
  (match s
    [(? real? a) (NumC a)]
@@ -171,7 +171,7 @@
    [(? symbol? id)
     (cond
       [(valid-idc id) (IdC id)]
-      [else (error 'parse (string-append "DXUQ invalid identifier: " (symbol->string id)))])]
+      [else (error 'parse (string-append "DXUQ invalid identifier: " (~a id)))])]
    [(list 'fn (list (? symbol? params) ...) body)
     (LamC (validate-params (cast params (Listof Symbol))) (parse body))]  
    [(list 'let defs ... 'in body) (desugar-let (cast defs (Listof Sexp)) body)]
@@ -179,12 +179,12 @@
     (cond
       [(equal? (length exprs) 3)
        (IfC (parse (first exprs)) (parse (second exprs)) (parse (third exprs)))]
-      [else (error 'parse "DXUQ invalid syntax for if")])]
+      [else (error 'parse (string-append "DXUQ invalid syntax for if: " (~a s)))])]
    [(list fun args ...) (AppC (parse fun) (map parse args))]
-   [else (error 'parse "DXUQ invalid input to parse")]))
+   [else (error 'parse (string-append "DXUQ invalid input to parse: " (~a s)))]))
 
 
-;desugars a let into an AppC
+;;Desugars a 'let' s-expression into an AppC
 (define (desugar-let [defs : (Listof Sexp)] [body : Sexp]) : AppC
   (define var-names (map get-var-name defs))
   (define dup (check-duplicates var-names))
@@ -194,19 +194,19 @@
   (AppC (LamC (map get-var-name defs) (parse body))
         (map (λ ([x : Sexp]) (parse (get-var-value x))) defs)))
 
-;parse a definition, return variable name
+;;parse a variable definition, return the variable name
 (define (get-var-name [def : Sexp]) : Symbol
   (match def
     [(list (? symbol? name) '= value) name]
-    [else (error (string-append "DXUQ invalid variable definition"))]))
+    [else (error (string-append "DXUQ invalid variable definition: " (~a def)))]))
 
-;parse a definition, return variable value
+;;parse a variable definition, return the variable value
 (define (get-var-value [def : Sexp]) : Sexp
   (match def
     [(list (? symbol? name) '= value) value]
-    [else (error (string-append "DXUQ invalid variable definition"))]))
+    [else (error (string-append "DXUQ invalid variable definition: " (~a def)))]))
 
-;verifies a function has no duplicate parameters, returns the list if no duplicates exist
+;;verifies a function has no duplicate parameters, returns the list if no duplicates exist
 (define (validate-params [params : (Listof Symbol)]) : (Listof Symbol)
   (define dup (check-duplicates params))
   (match dup
@@ -216,7 +216,7 @@
 
 ;-----------------------------------------------------------------------------------------
 
-;Given a symbol, valid-idc returns a boolean representing whether the symbol is a valid argument to BinOp
+;;Determines if a given identifier is a valid identifier
 (define (valid-idc [id : Sexp]) : Boolean
   (match id
     ['let #f]
@@ -229,7 +229,7 @@
 
 ;;----------------------------------------------------------------------------------------------
 
-; Given a DXUQ value returns a string
+;;Serializes a DXUQ value to its string representation
 (define (serialize [v : Value]) : String
   (match v
     [(NumV n) (~v n)]
@@ -242,7 +242,7 @@
 
 ;;----------------------------------------------------------------------------------------------
 
-;define top-env
+;define top-env, loaded with primitive values, passed in to interp
 (define top-env (list (Binding '+ (PrimV add))
                       (Binding '* (PrimV multiply))
                       (Binding '/ (PrimV divide))
@@ -317,6 +317,14 @@
 (check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
           (lambda () (env-lookup 'x (list (Binding 'y (NumV 4))))))
 
+;Test cases for env-extend
+(check-equal? (env-extend 'var (NumV 4) (list (Binding 'x (NumV 10))))
+              (list (Binding 'var (NumV 4)) (Binding 'x (NumV 10))))
+
+;Test cases for env-extend-all
+(check-equal? (env-extend-all '(x y) (list (NumV 4) (NumV 5)) '())
+              (list (Binding 'y (NumV 5)) (Binding 'x (NumV 4))))
+
 ;Test cases for add
 (check-equal? (add (list (NumV 4) (NumV 10))) (NumV 14))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to +"))
@@ -358,7 +366,7 @@
 ;Test cases for error
 (check-exn (regexp (regexp-quote "user-error: DXUQ bad data"))
           (lambda () (user-error (list (StringV "bad data")))))
-(check-exn (regexp (regexp-quote "DXUQ incorrect number of arguments passed to error"))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to error"))
           (lambda () (user-error (list (StringV "bad data") (StringV "test")))))
 
 ;Test Cases for the parse
@@ -377,7 +385,7 @@
                     (list (AppC (IdC '+) (list (NumC 9) (NumC 14))) (NumC 98))))
 (check-exn (regexp (regexp-quote "DXUQ invalid identifier: in"))
           (lambda () (parse '{{fn {in y} {* in y}} 2 16})))
-(check-exn (regexp (regexp-quote "DXUQ invalid input to parse"))
+(check-exn (regexp (regexp-quote "DXUQ invalid input to parse: ()"))
           (lambda () (parse '{})))
 
 ;Test Cases for desugar-let
@@ -389,7 +397,7 @@
 
 ;Test Cases for get-var-name
 (check-equal? (get-var-name '(var = 45)) 'var)
-(check-exn (regexp (regexp-quote "DXUQ invalid variable definition"))
+(check-exn (regexp (regexp-quote "DXUQ invalid variable definition: (var == 45)"))
           (lambda () (get-var-name '(var == 45))))
 
 ;Test Cases for validate-params
@@ -400,10 +408,10 @@
 ;Test Cases for get-var-value
 (check-equal? (get-var-value '(var = 45)) '45)
 (check-equal? (get-var-value '(var = {* 4 5})) '(* 4 5))
-(check-exn (regexp (regexp-quote "DXUQ invalid variable definition"))
+(check-exn (regexp (regexp-quote "DXUQ invalid variable definition: (var == 45)"))
           (lambda () (get-var-value '(var == 45))))
 
-;Test Cases for the valid
+;Test Cases for the valid-idc
 (check-equal? (valid-idc 'x) #t)
 (check-equal? (valid-idc '+) #t)
 (check-equal? (valid-idc 'if) #f)
