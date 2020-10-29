@@ -96,6 +96,7 @@
     [(StringV str) str]
     [(CloV params body env) "#<procedure>"]
     [(PrimV fun) "#<primop>"]
+    [(NullV) "null"]
     [(BoolV b) (cond
                     [(equal? b #t) "true"]
                     [else "false"])]))
@@ -486,6 +487,7 @@
 (check-equal? (serialize (BoolV #t)) "true")
 (check-equal? (serialize (BoolV #f)) "false")
 (check-equal? (serialize (PrimV add)) "#<primop>")
+(check-equal? (serialize (NullV)) "null")
 (check-equal? (serialize
                (CloV '(x y)
                      (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env))
