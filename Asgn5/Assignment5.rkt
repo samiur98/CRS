@@ -9,21 +9,20 @@
 ; Data Definitions:
 
 ;Creating the data-types of both the ExprC
-(define-type ExprC (U NumC IdC AppC LamC IfC StringC))
+(define-type ExprC (U NumC IdC AppC LamC IfC StringC MutC))
 (struct NumC ([n : Real]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : ExprC] [args : (Listof ExprC)]) #:transparent)
 (struct LamC ([params : (Listof Symbol)] [body : ExprC])  #:transparent)
 (struct IfC ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
 (struct StringC ([str : String]) #:transparent)
+(struct MutC ([s : Symbol] [val : ExprC]) #:transparent)
 
 ;define Environment and Store
 (define-type Location Natural)
 (define-type Env (Listof Binding))
 (define-type Store (Mutable-HashTable Location Value))
-
 (struct Binding ((id : Symbol) (val : Location)) #:transparent)
-(struct Cell ((location : Location) (val : Value)))
 
 ;define Value
 (define-type Value (U NumV PrimV CloV BoolV StringV NullV))
@@ -48,16 +47,18 @@
      
      [(NumC n) (NumV n)]
 
-     ;[(StringC str) (StringV str)]
+     [(StringC str) (StringV str)]
      
      [(IdC s) (fetch (env-lookup s env) store)]
 
-     #;[(IfC test then else) (match (interp test env)
-                             [(BoolV #t) (interp then env)]
-                             [(BoolV #f) (interp else env)]
+     [(MutC sym expr) (store-set! (env-lookup sym env) (interp expr env store) store) (NullV)]
+
+     [(IfC test then else) (match (interp test env store)
+                             [(BoolV #t) (interp then env store)]
+                             [(BoolV #f) (interp else env store)]
                              [else (error 'interp "DXUQ if condition is not a boolean")])]
 
-     ;[(LamC param body) (CloV param body env)]
+     [(LamC param body) (CloV param body env)]
      
      [(AppC fun args)
       
@@ -68,7 +69,7 @@
         
         [(PrimV fun) (fun (map (λ ([x : ExprC]) (interp x env store)) args))]
 
-        #;[(CloV params body clo-env)
+        [(CloV params body clo-env)
 
          ;;verify correct number of arguments
          (cond
@@ -79,7 +80,7 @@
          (define arg_vals (map (λ ([x : ExprC]) (interp x env store)) args))
 
          ;extend CloV environment with parameters
-         (define new-env (env-extend-all params arg_vals clo-env))
+         (define new-env (env-store-extend-all params arg_vals clo-env store))
          
          ;evaluate the function body
          (interp body new-env store)]
@@ -100,7 +101,7 @@
                     [else "false"])]))
 
 ;-------------------------------------------------------------------------------------------
-;define Arithmetic functions
+;define Primitive functions
 
 ;;primitive addition - adds two NumV's together
 (define (add [args : (Listof Value)]) : Value
@@ -148,6 +149,13 @@
     [(list arg) (error 'user-error (string-append "DXUQ " (serialize arg)))]
     [else (error (string-append "DXUQ invalid arguments passed to error: " (~v args)))]))
 
+;;runs a sequence of expressions, returning the result of the last one
+(define (begin [args : (Listof Value)]) : Value
+  (cond
+    [(equal? (length args) 0) (error 'begin "DXUQ no arguments passed to begin")]
+    [(equal? (length args) 1) (first args)]
+    [else (begin (rest args))]))
+
 ;-------------------------------------------------------------------------------------------
 
 ;;grabs the location of an id in an environment
@@ -173,11 +181,12 @@
   (cond
     [(empty? ids) env]
     [else
-     (store-extend )
+     (define new-loc (hash-count store))
+     (store-set! new-loc (first args) store)
      (env-store-extend-all
            (rest ids)
            (rest args)
-           (env-extend (first ids) (first args) env) store)]))
+           (env-extend (first ids) new-loc env) store)]))
 
 ;-------------------------------------------------------------------------------------------
 
@@ -187,13 +196,9 @@
 
 ;-------------------------------------------------------------------------------------------
 
-;;Adds a single cell to a store
-(define (store-extend [loc : Location] [val : Value] [store : Store]) : Void
+;;Sets a value in the store at the given location
+(define (store-set! [loc : Location] [val : Value] [store : Store]) : Void
   (hash-set! store loc val))
-
-;-------------------------------------------------------------------------------------------
-
-;;Gets the next available location from a store
 
 ;-----------------------------------------------------------------------------------------
 
@@ -214,6 +219,7 @@
       [(equal? (length exprs) 3)
        (IfC (parse (first exprs)) (parse (second exprs)) (parse (third exprs)))]
       [else (error 'parse (string-append "DXUQ invalid syntax for if: " (~a s)))])]
+   [(list (? symbol? id) ':= expr) (MutC id (parse expr))]
    [(list fun args ...) (AppC (parse fun) (map parse args))]
    [else (error 'parse (string-append "DXUQ invalid input to parse: " (~a s)))]))
 
@@ -273,7 +279,8 @@
                       (Binding 'equal? 5)
                       (Binding 'error 6)
                       (Binding 'true 7)
-                      (Binding 'false 8)))
+                      (Binding 'false 8)
+                      (Binding 'begin 9)))
 
 ;define top-store
 (: top-store (Mutable-HashTable Location Value))
@@ -287,6 +294,7 @@
 (hash-set! top-store 6 (PrimV user-error))
 (hash-set! top-store 7 (BoolV #t))
 (hash-set! top-store 8 (BoolV #f))
+(hash-set! top-store 9 (PrimV begin))
 
 ;;----------------------------------------------------------------------------------------------
 ;Test Cases
@@ -309,6 +317,8 @@
 (check-equal? (top-interp '{<= 10 20}) "true")
 (check-equal? (top-interp '{equal? 10 20}) "false")
 (check-equal? (top-interp '{equal? 20 20}) "true")
+(check-equal? (top-interp '{begin 20 30 40 50 60}) "60")
+(check-equal? (top-interp '{{fn {x} {begin 15 {x := 22} x}} 5}) "22")
 (check-exn (regexp (regexp-quote "DXUQ duplicate parameter: x"))
           (lambda () (top-interp '{{fn {x x} {+ x x}} 20 30})))
 (check-exn (regexp (regexp-quote "DXUQ invalid syntax for if"))
@@ -319,46 +329,54 @@
           (lambda () (top-interp '{{+ 5 5} 20 20})))
 
 ;Test Cases for the interp
-(check-equal? (interp (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env) (NumV 9))
-(check-equal? (interp (AppC (IdC '-) (list (NumC 10) (NumC 5))) top-env) (NumV 5))
-(check-equal? (interp (AppC (IdC '*) (list (NumC 10) (NumC 5))) top-env) (NumV 50))
-(check-equal? (interp (IdC 'true) top-env) (BoolV #t))
-(check-equal? (interp (IdC 'false) top-env) (BoolV #f))
-(check-equal? (interp (StringC '"test string") top-env) (StringV "test string"))
-(check-equal? (interp (IfC (IdC 'true) (NumC 10) (NumC 20)) top-env) (NumV 10))
-(check-equal? (interp (IfC (IdC 'false) (NumC 10) (NumC 20)) top-env) (NumV 20))
+(check-equal? (interp (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env top-store) (NumV 9))
+(check-equal? (interp (AppC (IdC '-) (list (NumC 10) (NumC 5))) top-env top-store) (NumV 5))
+(check-equal? (interp (AppC (IdC '*) (list (NumC 10) (NumC 5))) top-env top-store) (NumV 50))
+(check-equal? (interp (AppC (IdC '*) (list (NumC 10) (NumC 5))) top-env top-store) (NumV 50))
+(check-equal? (interp (IdC 'true) top-env top-store) (BoolV #t))
+(check-equal? (interp (IdC 'false) top-env top-store) (BoolV #f))
+(check-equal? (interp (StringC '"test string") top-env top-store) (StringV "test string"))
+(check-equal? (interp (IfC (IdC 'true) (NumC 10) (NumC 20)) top-env top-store) (NumV 10))
+(check-equal? (interp (IfC (IdC 'false) (NumC 10) (NumC 20)) top-env top-store) (NumV 20))
 (check-equal? (interp (AppC
-                       (LamC (list 'x) (AppC (IdC '+) (list (IdC 'x) (NumC 1)))) (list (NumC 5)))
-                      top-env) (NumV 6))
+                       (LamC (list 'x) (AppC (IdC '+)(list(IdC 'x)(NumC 1))))(list (NumC 5)))
+                      top-env top-store) (NumV 6))
 (check-equal? (interp(AppC
                       (LamC (list 'x 'y)
                             (AppC (IdC '+) (list (IdC 'x) (IdC 'y)))) (list (NumC 25)(NumC 5)))
-                      top-env) (NumV 30))
+                      top-env top-store) (NumV 30))
 (check-exn (regexp (regexp-quote "DXUQ invalid function call"))
-          (lambda () (interp (AppC (NumC 5) (list (NumC 4) (NumC 5))) top-env)))
+          (lambda () (interp (AppC (NumC 5) (list (NumC 4) (NumC 5))) top-env top-store)))
 (check-exn (regexp (regexp-quote "DXUQ if condition is not a boolean"))
-          (lambda () (interp (IfC (NumC 10) (NumC 4) (NumC 8)) top-env)))
+          (lambda () (interp (IfC (NumC 10) (NumC 4) (NumC 8)) top-env top-store)))
 (check-exn (regexp (regexp-quote "DXUQ division by zero: 10 / 0"))
-          (lambda () (interp (AppC (IdC '/) (list (NumC 10) (NumC 0))) top-env)))
+          (lambda () (interp (AppC (IdC '/) (list (NumC 10) (NumC 0)))
+                             top-env top-store)))
 (check-exn (regexp (regexp-quote "DXUQ division by zero: 20 / 0"))
           (lambda () (interp (AppC (IdC '/)
                                    (list (NumC 20)
-                                         (AppC (IdC '-) (list (NumC 25) (NumC 25))))) top-env)))
+                                         (AppC (IdC '-) (list (NumC 25) (NumC 25)))))
+                             top-env top-store)))
+
+;Test cases for fetch
+(: test-store (Mutable-HashTable Location Value))
+(define test-store (make-hash))
+(hash-set! test-store 0 (NumV 5))
+(check-equal? (fetch 0 test-store) (NumV 5))
+(check-equal? (fetch 1 test-store) (NullV))
 
 ;Test cases for env-lookup
-(check-equal? (env-lookup 'var (list (Binding 'var (NumV 4)))) (NumV 4))
-(check-equal? (env-lookup 'true top-env) (BoolV #t))
-(check-equal? (env-lookup 'false top-env) (BoolV #f))
+(check-equal? (env-lookup 'var (list (Binding 'var 5))) 5)
 (check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
-          (lambda () (env-lookup 'x (list (Binding 'y (NumV 4))))))
+          (lambda () (env-lookup 'x (list (Binding 'y 4)))))
 
 ;Test cases for env-extend
-(check-equal? (env-extend 'var (NumV 4) (list (Binding 'x (NumV 10))))
-              (list (Binding 'var (NumV 4)) (Binding 'x (NumV 10))))
+(check-equal? (env-extend 'var 10 (list (Binding 'x 2)))
+              (list (Binding 'var 10) (Binding 'x 2)))
 
 ;Test cases for env-extend-all
-(check-equal? (env-extend-all '(x y) (list (NumV 4) (NumV 5)) '())
-              (list (Binding 'y (NumV 5)) (Binding 'x (NumV 4))))
+(check-equal? (env-store-extend-all '(x y) (list (NumV 4) (NumV 5)) '() (make-hash))
+              (list (Binding 'y 1) (Binding 'x 0)))
 
 ;Test cases for add
 (check-equal? (add (list (NumV 4) (NumV 10))) (NumV 14))
@@ -404,12 +422,19 @@
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to error"))
           (lambda () (user-error (list (StringV "bad data") (StringV "test")))))
 
+;Test cases for begin
+(check-equal? (begin (list (NumV 36) (NumV 6))) (NumV 6))
+(check-exn (regexp (regexp-quote "DXUQ no arguments passed to begin"))
+          (lambda () (begin '())))
+
 ;Test Cases for the parse
 (check-equal? (parse 'true) (IdC 'true))
 (check-equal? (parse 'false) (IdC 'false))
 (check-equal? (parse '"test string") (StringC "test string"))
 (check-equal? (parse '{if true 1 2}) (IfC (IdC 'true) (NumC 1) (NumC 2)))
 (check-equal? (parse '{+ 1 2}) (AppC (IdC '+) (list (NumC 1) (NumC 2))))
+(check-equal? (parse '{x := 3}) (MutC 'x (NumC 3)))
+(check-equal? (parse '{x := {+ 4 5}}) (MutC 'x (AppC (IdC '+) (list (NumC 4) (NumC 5)))))
 (check-equal? (parse '{fn {x y} {* x y}})
               (LamC (list 'x 'y) (AppC (IdC '*) (list (IdC 'x) (IdC 'y)))))
 (check-equal? (parse '{{fn {x y} {* x y}} 2 16})
