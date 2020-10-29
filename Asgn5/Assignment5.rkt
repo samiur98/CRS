@@ -271,7 +271,7 @@
 
 ;;----------------------------------------------------------------------------------------------
 
-;define top-env, loaded with primitive values, passed in to interp
+;define top-env, loaded with primitive functions, passed in to interp
 (define top-env (list (Binding '+ 0)
                       (Binding '* 1)
                       (Binding '/ 2)
@@ -283,7 +283,7 @@
                       (Binding 'false 8)
                       (Binding 'begin 9)))
 
-;define top-store
+;define top-store, loaded with primitive functions, passed in to interp
 (: top-store (Mutable-HashTable Location Value))
 (define top-store (make-hash))
 (hash-set! top-store 0 (PrimV add))
