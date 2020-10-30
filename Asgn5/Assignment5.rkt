@@ -21,16 +21,18 @@
 ;define Environment and Store
 (define-type Location Natural)
 (define-type Env (Listof Binding))
-(define-type Store (Mutable-HashTable Location Value))
+(struct Store ([table : (Mutable-HashTable Location Value)]
+               [count : (Boxof Natural)]) #:transparent)
 (struct Binding ((id : Symbol) (val : Location)) #:transparent)
 
 ;define Value
-(define-type Value (U NumV PrimV CloV BoolV StringV NullV))
+(define-type Value (U NumV PrimV CloV BoolV StringV NullV ArrayV))
 (struct NumV ([n : Real]) #:transparent)
 (struct BoolV ([b : Boolean]) #:transparent)
 (struct StringV ([str : String]) #:transparent)
-(struct PrimV ([fun : (-> (Listof Value) Value)]) #:transparent)
+(struct PrimV ([fun : (-> (Listof Value) Store Value)]) #:transparent)
 (struct CloV ([params : (Listof Symbol)] [body : ExprC] [clo-env : Env]) #:transparent)
+(struct ArrayV ([startLoc : Location] [size : Natural]) #:transparent)
 (struct NullV ()#:transparent)
 
 ;-------------------------------------------------------------------------------------------
@@ -67,7 +69,7 @@
       
       (match funval
         
-        [(PrimV fun) (fun (map (λ ([x : ExprC]) (interp x env store)) args))]
+        [(PrimV fun) (fun (map (λ ([x : ExprC]) (interp x env store)) args) store)]
 
         [(CloV params body clo-env)
 
@@ -97,6 +99,7 @@
     [(CloV params body env) "#<procedure>"]
     [(PrimV fun) "#<primop>"]
     [(NullV) "null"]
+    [(ArrayV loc size) "#<array>"]
     [(BoolV b) (cond
                     [(equal? b #t) "true"]
                     [else "false"])]))
@@ -105,25 +108,25 @@
 ;define Primitive functions
 
 ;;primitive addition - adds two NumV's together
-(define (add [args : (Listof Value)]) : Value
+(define (add [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list (? NumV? a) (? NumV? b)) (NumV (+ (NumV-n a) (NumV-n b)))]
     [else (error '+ (string-append "DXUQ invalid arguments passed to +: " (~v args)))]))
 
 ;;primitive subtraction - subtracts two NumV's
-(define (subtract [args : (Listof Value)]) : Value
+(define (subtract [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list (? NumV? a) (? NumV? b)) (NumV (- (NumV-n a) (NumV-n b)))]
     [else (error '+ (string-append "DXUQ invalid arguments passed to -: " (~v args)))]))
 
 ;;primitive multiplication - multiply two NumV's
-(define (multiply [args : (Listof Value)]) : Value
+(define (multiply [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list (? NumV? a) (? NumV? b)) (NumV (* (NumV-n a) (NumV-n b)))]
     [else (error '+ (string-append "DXUQ invalid arguments passed to *: " (~v args)))]))
 
 ;;primitive division - divide two NumV's
-(define (divide [args : (Listof Value)]) : Value
+(define (divide [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list (NumV left) (NumV right))
      (cond
@@ -133,29 +136,58 @@
     [else (error '+ (string-append "DXUQ invalid arguments passed to /: " (~v args)))]))
 
 ;;primitive less than or equal to - compare two NumV's with <=
-(define (leq [args : (Listof Value)]) : Value
+(define (leq [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list (NumV left) (NumV right)) (BoolV (<= left right))]
     [else (error '+ (string-append "DXUQ invalid arguments passed to <=: " (~v args)))]))
 
 ;;primitive equality - compare two NumV's with equal?
-(define (eq [args : (Listof Value)]) : Value
+(define (eq [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list left right) (BoolV (equal? left right))]
     [else (error '+ (string-append "DXUQ invalid arguments passed to equal?: " (~v args)))]))
 
 ;;signals a user error
-(define (user-error [args : (Listof Value)]) : Value
+(define (user-error [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list arg) (error 'user-error (string-append "DXUQ " (serialize arg)))]
     [else (error (string-append "DXUQ invalid arguments passed to error: " (~v args)))]))
 
 ;;runs a sequence of expressions, returning the result of the last one
-(define (begin [args : (Listof Value)]) : Value
+(define (begin [args : (Listof Value)] [store : Store]) : Value
   (cond
     [(equal? (length args) 0) (error 'begin "DXUQ no arguments passed to begin")]
     [(equal? (length args) 1) (first args)]
-    [else (begin (rest args))]))
+    [else (begin (rest args) store)]))
+
+;;creates a new array given a size and initial value
+(define (new-array [args : (Listof Value)] [store : Store]) : Value
+  (match args
+    [(list (NumV num) value)
+     (cond
+       [(not (natural? num))(error 'new-array "DXUQ new-array size must be an integer")]
+       [(< num 1) (error 'new-array "DXUQ new-array size must be >= 1")]
+       [else (ArrayV (allocate num value store) num)])]
+    [else (error 'new-array
+                 (string-append "DXUQ invalid args to new-array: " (~v args)))]))
+
+;-------------------------------------------------------------------------------------------
+
+;;allocates a given number of cells in a store, returns the location of the first
+(define (allocate [size : Integer] [val : Value] [store : Store]) : Location
+  (define first-loc (single-alloc store))
+  (store-set! first-loc val store)
+  (cond
+    [(equal? size 1) first-loc]
+    [else (allocate (- size 1) val store) first-loc]))
+
+;-------------------------------------------------------------------------------------------
+
+;;adds a single location to a store
+(define (single-alloc [store : Store]) : Location
+  (define count (unbox (Store-count store)))
+  (set-box! (Store-count store) (+ count 1))
+  count)
 
 ;-------------------------------------------------------------------------------------------
 
@@ -172,17 +204,18 @@
 ;;grabs the value of a location in a store 
 (define (fetch [loc : Location] [store : Store]) : Value
   (cond
-    [(hash-has-key? store loc) (hash-ref store loc)]
+    [(hash-has-key? (Store-table store) loc) (hash-ref (Store-table store) loc)]
     [else (NullV)]))
 
 ;-------------------------------------------------------------------------------------------
 
 ;;Given a list of identifiers and a list of values, adds each identifier-value pair to an env
-(define (env-store-extend-all [ids : (Listof Symbol)] [args : (Listof Value)] [env : Env] [store : Store]) : Env
+(define (env-store-extend-all [ids : (Listof Symbol)] [args : (Listof Value)]
+                              [env : Env] [store : Store]) : Env
   (cond
     [(empty? ids) env]
     [else
-     (define new-loc (hash-count store))
+     (define new-loc (single-alloc store))
      (store-set! new-loc (first args) store)
      (env-store-extend-all
            (rest ids)
@@ -199,7 +232,7 @@
 
 ;;Sets a value in the store at the given location
 (define (store-set! [loc : Location] [val : Value] [store : Store]) : Void
-  (hash-set! store loc val))
+  (hash-set! (Store-table store) loc val))
 
 ;-----------------------------------------------------------------------------------------
 
@@ -271,6 +304,9 @@
 
 ;;----------------------------------------------------------------------------------------------
 
+;;Holds the Number of total primitive functions, for the initial Store table count
+(define NUM_PRIMITIVES 11)
+
 ;define top-env, loaded with primitive functions, passed in to interp
 (define top-env (list (Binding '+ 0)
                       (Binding '* 1)
@@ -281,21 +317,22 @@
                       (Binding 'error 6)
                       (Binding 'true 7)
                       (Binding 'false 8)
-                      (Binding 'begin 9)))
+                      (Binding 'begin 9)
+                      (Binding 'new-array 10)))
 
 ;define top-store, loaded with primitive functions, passed in to interp
-(: top-store (Mutable-HashTable Location Value))
-(define top-store (make-hash))
-(hash-set! top-store 0 (PrimV add))
-(hash-set! top-store 1 (PrimV multiply))
-(hash-set! top-store 2 (PrimV divide))
-(hash-set! top-store 3 (PrimV subtract))
-(hash-set! top-store 4 (PrimV leq))
-(hash-set! top-store 5 (PrimV eq))
-(hash-set! top-store 6 (PrimV user-error))
-(hash-set! top-store 7 (BoolV #t))
-(hash-set! top-store 8 (BoolV #f))
-(hash-set! top-store 9 (PrimV begin))
+(define top-store (Store (make-hash) (box NUM_PRIMITIVES)))
+(store-set! 0 (PrimV add) top-store)
+(store-set! 1 (PrimV multiply) top-store)
+(store-set! 2 (PrimV divide) top-store)
+(store-set! 3 (PrimV subtract) top-store)
+(store-set! 4 (PrimV leq) top-store)
+(store-set! 5 (PrimV eq) top-store)
+(store-set! 6 (PrimV user-error) top-store)
+(store-set! 7 (BoolV #t) top-store)
+(store-set! 8 (BoolV #f) top-store)
+(store-set! 9 (PrimV begin) top-store)
+(store-set! 10 (PrimV new-array) top-store)
 
 ;;----------------------------------------------------------------------------------------------
 ;Test Cases
@@ -319,6 +356,7 @@
 (check-equal? (top-interp '{equal? 10 20}) "false")
 (check-equal? (top-interp '{equal? 20 20}) "true")
 (check-equal? (top-interp '{begin 20 30 40 50 60}) "60")
+(check-equal? (top-interp '{new-array 5 60}) "#<array>")
 (check-equal? (top-interp '{{fn {x} {begin 15 {x := 22} x}} 5}) "22")
 (check-exn (regexp (regexp-quote "DXUQ duplicate parameter: x"))
           (lambda () (top-interp '{{fn {x x} {+ x x}} 20 30})))
@@ -360,9 +398,8 @@
                              top-env top-store)))
 
 ;Test cases for fetch
-(: test-store (Mutable-HashTable Location Value))
-(define test-store (make-hash))
-(hash-set! test-store 0 (NumV 5))
+(define test-store (Store (make-hash) (box 0)))
+(store-set! 0 (NumV 5) test-store)
 (check-equal? (fetch 0 test-store) (NumV 5))
 (check-equal? (fetch 1 test-store) (NullV))
 
@@ -376,57 +413,85 @@
               (list (Binding 'var 10) (Binding 'x 2)))
 
 ;Test cases for env-extend-all
-(check-equal? (env-store-extend-all '(x y) (list (NumV 4) (NumV 5)) '() (make-hash))
+(check-equal? (env-store-extend-all '(x y) (list (NumV 4) (NumV 5))'()
+                                    (Store (make-hash) (box 0)))
               (list (Binding 'y 1) (Binding 'x 0)))
 
+;dummy store for primtive functions that take a store but do nothing with it:
+(define d-store (Store (make-hash) (box 0)))
+
 ;Test cases for add
-(check-equal? (add (list (NumV 4) (NumV 10))) (NumV 14))
+(check-equal? (add (list (NumV 4) (NumV 10)) d-store) (NumV 14))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to +"))
-          (lambda () (add (list (NumV 4) (NumV 10) (NumV 12)))))
+          (lambda () (add (list (NumV 4) (NumV 10) (NumV 12)) d-store)))
 
 ;Test cases for subtract
-(check-equal? (subtract (list (NumV 25) (NumV 4))) (NumV 21))
+(check-equal? (subtract (list (NumV 25) (NumV 4)) d-store) (NumV 21))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to -"))
-          (lambda () (subtract (list (NumV 4) (NumV 10) (NumV 12)))))
+          (lambda () (subtract (list (NumV 4) (NumV 10) (NumV 12)) d-store)))
 
 ;Test cases for multiply
-(check-equal? (multiply (list (NumV 5) (NumV 12))) (NumV 60))
+(check-equal? (multiply (list (NumV 5) (NumV 12)) d-store) (NumV 60))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to *"))
-          (lambda () (multiply (list (NumV 4) (NumV 10) (NumV 12)))))
+          (lambda () (multiply (list (NumV 4) (NumV 10) (NumV 12)) d-store)))
 
 ;Test cases for divide
-(check-equal? (divide (list (NumV 36) (NumV 6))) (NumV 6))
+(check-equal? (divide (list (NumV 36) (NumV 6)) d-store) (NumV 6))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to /"))
-          (lambda () (divide (list (NumV 4) (NumV 10) (NumV 12)))))
+          (lambda () (divide (list (NumV 4) (NumV 10) (NumV 12)) d-store)))
 
 ;Test cases for leq
-(check-equal? (leq (list (NumV 5) (NumV 12))) (BoolV #t))
-(check-equal? (leq (list (NumV 14) (NumV 12))) (BoolV #f))
+(check-equal? (leq (list (NumV 5) (NumV 12)) d-store) (BoolV #t))
+(check-equal? (leq (list (NumV 14) (NumV 12)) d-store) (BoolV #f))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to <="))
-          (lambda () (leq (list (NumV 4) (NumV 10) (NumV 12)))))
+          (lambda () (leq (list (NumV 4) (NumV 10) (NumV 12)) d-store)))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to <="))
-          (lambda () (leq (list (NumV 4) (NumV 10) (BoolV #t)))))
+          (lambda () (leq (list (NumV 4) (NumV 10) (BoolV #t)) d-store) ))
 
 ;Test cases for eq
-(check-equal? (eq (list (NumV 12) (NumV 12))) (BoolV #t))
-(check-equal? (eq (list (StringV "test1") (StringV "test1"))) (BoolV #t))
-(check-equal? (eq (list (BoolV #t) (BoolV #t))) (BoolV #t))
-(check-equal? (eq (list (StringV "test1") (StringV "test2"))) (BoolV #f))
+(check-equal? (eq (list (NumV 12) (NumV 12)) d-store) (BoolV #t))
+(check-equal? (eq (list (StringV "test1") (StringV "test1")) d-store) (BoolV #t))
+(check-equal? (eq (list (BoolV #t) (BoolV #t)) d-store) (BoolV #t))
+(check-equal? (eq (list (StringV "test1") (StringV "test2")) d-store) (BoolV #f))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to equal?"))
-          (lambda () (eq (list (NumV 4) (NumV 10) (NumV 12)))))
+          (lambda () (eq (list (NumV 4) (NumV 10) (NumV 12)) d-store)))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to equal?"))
-          (lambda () (eq (list (NumV 10) (NumV 10) (NumV 10)))))
+          (lambda () (eq (list (NumV 10) (NumV 10) (NumV 10)) d-store)))
 
 ;Test cases for error
 (check-exn (regexp (regexp-quote "user-error: DXUQ bad data"))
-          (lambda () (user-error (list (StringV "bad data")))))
+          (lambda () (user-error (list (StringV "bad data")) d-store)))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to error"))
-          (lambda () (user-error (list (StringV "bad data") (StringV "test")))))
+          (lambda () (user-error (list (StringV "bad data")(StringV "test"))
+                                 d-store)))
 
 ;Test cases for begin
-(check-equal? (begin (list (NumV 36) (NumV 6))) (NumV 6))
+(check-equal? (begin (list (NumV 36) (NumV 6)) d-store) (NumV 6))
 (check-exn (regexp (regexp-quote "DXUQ no arguments passed to begin"))
-          (lambda () (begin '())))
+          (lambda () (begin '() d-store)))
+
+;Test cases for new-array
+(define newarr-store (Store (make-hash) (box 0)))
+(check-equal? (new-array (list (NumV 5) (NumV 100)) newarr-store) (ArrayV 0 5))
+(check-equal? (new-array (list (NumV 10) (NumV 100)) newarr-store) (ArrayV 5 10))
+(check-equal? (new-array (list (NumV 10) (NumV 100)) newarr-store) (ArrayV 15 10))
+(check-exn (regexp (regexp-quote "DXUQ new-array size must be an integer"))
+          (lambda () (new-array (list (NumV 1.5) (NumV 100)) newarr-store)))
+(check-exn (regexp (regexp-quote "DXUQ new-array size must be >= 1"))
+          (lambda () (new-array (list (NumV 0) (NumV 100)) newarr-store)))
+(check-exn (regexp (regexp-quote "DXUQ invalid args to new-array"))
+          (lambda () (new-array (list (BoolV #f) (NumV 100)) newarr-store)))
+
+;Test cases for allocate
+(define alloc-table (Store (make-hash) (box 0)))
+(check-equal? (allocate 5 (NumV 0) alloc-table) 0)
+(check-equal? (allocate 5 (NumV 0) alloc-table) 5)
+
+;Test cases for single-alloc
+(define sa-table (Store (make-hash) (box 0)))
+(check-equal? (single-alloc sa-table) 0)
+(check-equal? (single-alloc sa-table) 1)
+(check-equal? (single-alloc sa-table) 2)
 
 ;Test Cases for the parse
 (check-equal? (parse 'true) (IdC 'true))
