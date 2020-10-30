@@ -1,38 +1,24 @@
 # CRS
 Repo for CSC 430
 
-Note:
-In the lab, our parser would parse code that looked like this: '(+ 4 (- 10 5))
-Now, our parser will parse code that looks like this: '{+ 4 {- 10 5}}
+Assignment #5
 
-BUT, Racket treats these exactly the same, so '(+ 4 (- 10 5)) equals '{+ 4 {- 10 5}} in racket
+What's done so far:
+- Store has been added
+- ':=' operator has been added
+- begin primitive implemented
+- ArrayV added
+- new-array primitive implemented
 
+Some helpers I made:
+- allocate -- allocates a sequence of locations in the store, initializes
+all of the cells to the given value, and returns the location of the first
+- single-alloc -- allocates a single location in the store, and returns its location
 
-TODO Tasks:
- 1. (Rohan) Convert to using a single "BinaryOperation" struct instead of separate Plus, Mult, etc. structs
- 	Do this in ExprC struct
- 	Modify parse to create binop structs instead of plus, mult, etc.
- 	Modify interpreter to evaluate binop structs 
-	~ I am done with this ~ Rohan
-
- 2. Add an "if statement", called ifleq0, to the ExprC struct, and 
- 	modify the parser to accept ifleq0 s-expression and return ifleq0 structs, and 
- 	modify the interpreter to evaluate ifleq0 structs
-
- 3. (I'll start with this part - Connor)Functions
- 	create required data structures for functions
- 	modify parser to read in funcdef s-expressions and return fundefC struct
- 	modify intpreter to evaluate fundefC structs
-
- 4. (Finished ~ Rohan) Divison (also prevent divide by zero. An error should be issued if this happens.)
-
- 5. Correct Errors - thrown at the right times and with the right messages
-
-
- Functions that are done (some may need to be edited as we make more changes)
- - (parse s) → ExprC
- - (parse-fundef s) → FundefC
- - (parse-prog s) → (listof FundefC)
- - (interp-fns funs) → Real
- - (interp exp funs) → Real
- - (top-interp fun-sexps) → Real
+Notes:
+- The Store is a struct with two attributes, a mutable hashtable and a Natural number.
+The number is used as a count for the number of items in the store.
+-Whenever you add a primitive, you have to create the racket function, and then
+add it to BOTH the top-env and top-store, in the same way the others are added,
+make sure the location value for a specific primitive is the same in both top-env
+and top-store.

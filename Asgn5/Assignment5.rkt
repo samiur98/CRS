@@ -304,9 +304,6 @@
 
 ;;----------------------------------------------------------------------------------------------
 
-;;Holds the Number of total primitive functions, for the initial Store table count
-(define NUM_PRIMITIVES 11)
-
 ;define top-env, loaded with primitive functions, passed in to interp
 (define top-env (list (Binding '+ 0)
                       (Binding '* 1)
@@ -319,6 +316,9 @@
                       (Binding 'false 8)
                       (Binding 'begin 9)
                       (Binding 'new-array 10)))
+
+;;Holds the Number of total primitive functions, for the initial Store table count
+(define NUM_PRIMITIVES (length top-env))
 
 ;define top-store, loaded with primitive functions, passed in to interp
 (define top-store (Store (make-hash) (box NUM_PRIMITIVES)))
