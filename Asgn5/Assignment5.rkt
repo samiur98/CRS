@@ -28,6 +28,7 @@
 ;define Value
 (define-type Value (U NumV PrimV CloV BoolV StringV NullV ArrayV))
 (struct NumV ([n : Real]) #:transparent)
+;(struct IntV ([n : Integer]) #:transparent)
 (struct BoolV ([b : Boolean]) #:transparent)
 (struct StringV ([str : String]) #:transparent)
 (struct PrimV ([fun : (-> (Listof Value) Store Value)]) #:transparent)
@@ -171,6 +172,37 @@
     [else (error 'new-array
                  (string-append "DXUQ invalid args to new-array: " (~v args)))]))
 
+
+;Needs to get done
+(define (array [args : (Listof Value)] [store : Store]) : Value
+  (NumV 10))
+
+;Done //However has not been tested
+
+(define (aref [args : (Listof Value)] [store : Store]) : Value
+  (match args
+    [(list (? ArrayV? arr) (? NumV? offset))
+     (cond
+       [(> (NumV-n offset) (ArrayV-size arr)) (error 'aref "DXUQ Cannot have an offset larger than array size")]
+       [(< (NumV-n offset) 0) (error 'aref "DXUQ Cannot have a negative index in an array")]
+       [else (fetch (+ (ArrayV-startLoc arr) (cast (NumV-n offset) Natural)) store)]
+       )]))
+
+
+;Needs to get done
+(define (aset! [args : (Listof Value)] [store : Store]) : Value
+  (NumV 10))
+
+;Done
+;Called it substring1 because substring was taken by the racket function itself
+(define (substring1 [args : (Listof Value)] [store : Store]) : Value
+     (match args
+       [(list (? StringV? string) (? NumV? left) (? NumV? right))
+        (StringV (substring (StringV-str string) (cast (NumV-n left) Integer)
+                                                 (cast (NumV-n right) Integer)))]))
+
+
+
 ;-------------------------------------------------------------------------------------------
 
 ;;allocates a given number of cells in a store, returns the location of the first
@@ -180,6 +212,10 @@
   (cond
     [(equal? size 1) first-loc]
     [else (allocate (- size 1) val store) first-loc]))
+
+
+
+
 
 ;-------------------------------------------------------------------------------------------
 
@@ -315,7 +351,10 @@
                       (Binding 'true 7)
                       (Binding 'false 8)
                       (Binding 'begin 9)
-                      (Binding 'new-array 10)))
+                      (Binding 'new-array 10)
+                      (Binding 'array 11)
+                      (Binding 'aref 12)
+                      (Binding 'substring1 12)))
 
 ;;Holds the Number of total primitive functions, for the initial Store table count
 (define NUM_PRIMITIVES (length top-env))
@@ -333,6 +372,8 @@
 (store-set! 8 (BoolV #f) top-store)
 (store-set! 9 (PrimV begin) top-store)
 (store-set! 10 (PrimV new-array) top-store)
+(store-set! 11 (PrimV aref) top-store)
+(store-set! 12 (PrimV substring1) top-store)
 
 ;;----------------------------------------------------------------------------------------------
 ;Test Cases
@@ -424,6 +465,7 @@
 (check-equal? (add (list (NumV 4) (NumV 10)) d-store) (NumV 14))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to +"))
           (lambda () (add (list (NumV 4) (NumV 10) (NumV 12)) d-store)))
+
 
 ;Test cases for subtract
 (check-equal? (subtract (list (NumV 25) (NumV 4)) d-store) (NumV 21))
@@ -557,3 +599,9 @@
                (CloV '(x y)
                      (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env))
               "#<procedure>")
+
+
+;Test Cases for substring
+(check-equal? (substring1 (list (StringV "Hello") (NumV 1) (NumV 5)) d-store) (StringV "ello"))
+(check-equal? (substring1 (list (StringV "Hello") (NumV 0) (NumV 4)) d-store) (StringV "Hell"))
+(check-equal? (substring1 (list (StringV "Hello") (NumV 0) (NumV 2)) d-store) (StringV "He"))
