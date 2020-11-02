@@ -175,7 +175,23 @@
 
 ;Needs to get done
 (define (array [args : (Listof Value)] [store : Store]) : Value
-  (NumV 10))
+  (define sizeOfArray (length args))
+  (define arrayVLoc (single-alloc store))
+  (define firstLoc (allocateArrayElements args sizeOfArray store))
+  (ArrayV firstLoc sizeOfArray)
+)
+
+(define (allocateArrayElements [args : (Listof Value)] [sizeOfArray : Natural] [store : Store]) : Location
+  (cond
+    [(equal? sizeOfArray 0) 0]
+    [else
+     (define firstLoc (single-alloc store))
+     (store-set! firstLoc (first args) store)
+     (allocateArrayElements (rest args) (- sizeOfArray 1) store)
+     firstLoc]))
+
+
+  
 
 ;Done //However has not been tested
 
@@ -189,9 +205,16 @@
        )]))
 
 
-;Needs to get done
+;Done //However has not been tested
 (define (aset! [args : (Listof Value)] [store : Store]) : Value
-  (NumV 10))
+  (match args
+    [(list (? ArrayV? arr) (? NumV? offset) value)
+     (cond
+       [(not (natural? (NumV-n offset))) (error 'aset "DXUQ Offset is not a natural number")] 
+       [(> (NumV-n offset) (ArrayV-size arr)) (error 'aset "DXUQ Cannot have an offset larger than size")]
+       [(< (NumV-n offset) 0) (error 'aset "DXUQ Cannot have a negative index in an array")]
+       [else (store-set! (+ (ArrayV-startLoc arr)  (NumV-n offset)) value store) (NullV)])]
+    [else (error 'aset "DXUQ Invalid Arguments")]))
 
 ;Done
 ;Called it substring1 because substring was taken by the racket function itself
