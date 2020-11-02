@@ -144,8 +144,14 @@
 ;;primitive equality - compare two NumV's with equal?
 (define (eq [args : (Listof Value)] [store : Store]) : Value
   (match args
+    [(list (? ArrayV? left) (? ArrayV? right))
+     (cond
+       [(and (equal? (ArrayV-size left) (ArrayV-size right))
+             (equal? (ArrayV-startLoc left) (ArrayV-startLoc right))) (BoolV #t)]
+       [else (BoolV #f)])]
     [(list left right) (BoolV (equal? left right))]
     [else (error '+ (string-append "DXUQ invalid arguments passed to equal?: " (~v args)))]))
+
 
 ;;signals a user error
 (define (user-error [args : (Listof Value)] [store : Store]) : Value
@@ -154,11 +160,11 @@
     [else (error (string-append "DXUQ invalid arguments passed to error: " (~v args)))]))
 
 ;;runs a sequence of expressions, returning the result of the last one
-(define (begin [args : (Listof Value)] [store : Store]) : Value
+(define (begin1 [args : (Listof Value)] [store : Store]) : Value
   (cond
     [(equal? (length args) 0) (error 'begin "DXUQ no arguments passed to begin")]
     [(equal? (length args) 1) (first args)]
-    [else (begin (rest args) store)]))
+    [else (begin1 (rest args) store)]))
 
 ;;creates a new array given a size and initial value
 (define (new-array [args : (Listof Value)] [store : Store]) : Value
@@ -194,9 +200,10 @@
 (define (aref [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list (? ArrayV? arr) (? NumV? offset))
+     (define index (NumV-n offset))
      (cond
-       [(> (NumV-n offset) (ArrayV-size arr)) (error 'aref "DXUQ array index larger than array size")]
-       [(< (NumV-n offset) 0) (error 'aref "DXUQ array index cannot be negative")]
+       [(not (natural? index)) (error 'aref "DXUQ aref index must be a natural number")]
+       [(>= (NumV-n offset) (ArrayV-size arr)) (error 'aref "DXUQ array index larger than array size")]
        [else (fetch (+ (ArrayV-startLoc arr) (cast (NumV-n offset) Natural)) store)])]))
 
 
@@ -205,18 +212,25 @@
   (match args
     [(list (? ArrayV? arr) (? NumV? offset) value)
      (cond
-       [(not (natural? (NumV-n offset))) (error 'aset "DXUQ Offset is not a natural number")] 
-       [(> (NumV-n offset) (ArrayV-size arr)) (error 'aset "DXUQ Cannot have an offset larger than size")]
-       [(< (NumV-n offset) 0) (error 'aset "DXUQ Cannot have a negative index in an array")]
+       [(not (natural? (NumV-n offset))) (error 'aset "DXUQ array index must be a natural number")]
+       [(>= (NumV-n offset) (ArrayV-size arr)) (error 'aset "DXUQ array index out of bounds")]
        [else (store-set! (+ (ArrayV-startLoc arr)  (NumV-n offset)) value store) (NullV)])]
-    [else (error 'aset "DXUQ Invalid Arguments")]))
+    [else (error 'aset "DXUQ invalid arguments to aset!")]))
 
-;Called it substring1 because substring was taken by the racket function itself
+;Takes the substring of a string given a string and two indices
 (define (substring1 [args : (Listof Value)] [store : Store]) : Value
-     (match args
-       [(list (? StringV? string) (? NumV? left) (? NumV? right))
-        (StringV (substring (StringV-str string) (cast (NumV-n left) Integer)
-                                                 (cast (NumV-n right) Integer)))]))
+  (match args
+    [(list (? StringV? string) (? NumV? left) (? NumV? right))
+     (define size (string-length (StringV-str string)))
+     (cond
+       [(not (and (natural? (NumV-n left)) (natural? (NumV-n right))))
+        (error 'substring1 "DXUQ Substring Indices need to be natural numbers")]
+       [(not (and (< (NumV-n left) size) (<= (NumV-n left) (NumV-n right))))
+        (error 'substring1 "DXUQ Left Index must be between 0 and length of string and less than right index")]
+       [(not (<= (NumV-n right) size)) (error 'substring1 "DXUQ Right Index must be less than length of string")]
+       [else (StringV (substring (StringV-str string) (NumV-n left) (NumV-n right)))])]
+    [else (error 'substring1 "DXUQ Invalid arguments to the substring function")]))
+
 
 ;-------------------------------------------------------------------------------------------
 
@@ -347,6 +361,7 @@
     ['fn #f]
     ['vars #f]
     ['lam #f]
+    [':= #f]
     [else #t]))
 
 
@@ -367,7 +382,8 @@
                       (Binding 'array 11)
                       (Binding 'aref 12)
                       (Binding 'aset! 13)
-                      (Binding 'substring 14)))
+                      (Binding 'substring 14)
+                      (Binding 'null 15)))
 
 ;;Holds the Number of total primitive functions, for the initial Store table count
 (define NUM_PRIMITIVES (length top-env))
@@ -383,12 +399,49 @@
 (store-set! 6 (PrimV user-error) top-store)
 (store-set! 7 (BoolV #t) top-store)
 (store-set! 8 (BoolV #f) top-store)
-(store-set! 9 (PrimV begin) top-store)
+(store-set! 9 (PrimV begin1) top-store)
 (store-set! 10 (PrimV new-array) top-store)
 (store-set! 11 (PrimV array) top-store)
 (store-set! 12 (PrimV aref) top-store)
 (store-set! 13 (PrimV aset!) top-store)
 (store-set! 14 (PrimV substring1) top-store)
+(store-set! 15 (NullV) top-store)
+
+
+(define while '{let {while = "null"} in
+               {begin
+                 {while := {fn {cond body}
+                            {if {cond} {begin {body} {while cond body}} null}}}
+                 while}})
+(define in-order '{let {in-order = "null"} in
+               {begin
+                 {in-order := {fn {nums size}
+                                {let {x = 1} {inc = true} in
+                                  {begin
+                                    {while {fn {} {<= x {- size 1}}}
+                                           {fn {} {if {<= {aref nums {- x 1}} {aref nums x}}
+                                             {x := {+ x 1}}
+                                           ;else
+                                             {begin {inc := false} {x := {+ x 1}}}}}}
+                                         inc}}}}
+                 in-order}})
+
+
+#;(top-interp '{let {while = "null"} {in-order = "null"} {temp = 0} in
+                 {begin
+                   {while := {fn {cond body} {if {cond} {begin {body} {while cond body}} null}}}
+                   {in-order := {fn {nums size}
+                                {let {x = 1} {inc = true} in
+                                  {begin
+                                    {while {fn {} {<= x {- size 1}}}
+                                           {fn {} {if {<= {aref nums {- x 1}} {aref nums x}}
+                                             {x := {+ x 1}}
+                                           ;else
+                                             {begin {inc := false} {x := {+ x 1}}}}}}
+                                         inc}}}}
+                   
+                   {in-order {array 3 6 7 8 9 10} 6}}})
+
 
 ;;----------------------------------------------------------------------------------------------
 ;Test Cases
@@ -413,7 +466,11 @@
 (check-equal? (top-interp '{equal? 20 20}) "true")
 (check-equal? (top-interp '{begin 20 30 40 50 60}) "60")
 (check-equal? (top-interp '{new-array 5 60}) "#<array>")
+(check-equal? (top-interp '{let {p = {array 3 4 false}} in
+                             {aref p 2}}) "false")
 (check-equal? (top-interp '{{fn {x} {begin 15 {x := 22} x}} 5}) "22")
+(check-equal? (top-interp '{{fn {p} {begin {aset! p 0 "hi"} {aref p 0}}}
+                            {array 3 4 false}}) "hi")
 (check-exn (regexp (regexp-quote "DXUQ duplicate parameter: x"))
           (lambda () (top-interp '{{fn {x x} {+ x x}} 20 30})))
 (check-exn (regexp (regexp-quote "DXUQ invalid syntax for if"))
@@ -510,6 +567,11 @@
 (check-equal? (eq (list (StringV "test1") (StringV "test1")) d-store) (BoolV #t))
 (check-equal? (eq (list (BoolV #t) (BoolV #t)) d-store) (BoolV #t))
 (check-equal? (eq (list (StringV "test1") (StringV "test2")) d-store) (BoolV #f))
+(define eq-store (Store (make-hash) (box 0)))
+(define array1 (new-array (list (NumV 5) (NumV 100)) eq-store))
+(define array2 (new-array (list (NumV 5) (NumV 100)) eq-store))
+(check-equal? (eq (list array1 array1) eq-store) (BoolV #t))
+(check-equal? (eq (list array1 array2) eq-store) (BoolV #f))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to equal?"))
           (lambda () (eq (list (NumV 4) (NumV 10) (NumV 12)) d-store)))
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to equal?"))
@@ -523,9 +585,9 @@
                                  d-store)))
 
 ;Test cases for begin
-(check-equal? (begin (list (NumV 36) (NumV 6)) d-store) (NumV 6))
+(check-equal? (begin1 (list (NumV 36) (NumV 6)) d-store) (NumV 6))
 (check-exn (regexp (regexp-quote "DXUQ no arguments passed to begin"))
-          (lambda () (begin '() d-store)))
+          (lambda () (begin1 '() d-store)))
 
 ;Test cases for new-array
 (define newarr-store (Store (make-hash) (box 0)))
@@ -562,10 +624,28 @@
 (check-equal? (aref (list arrV (NumV 0)) aref-store) (NumV 10))
 (check-equal? (aref (list arrV (NumV 1)) aref-store) (BoolV #t))
 (check-equal? (aref (list arrV (NumV 2)) aref-store) (NumV 20))
-(check-exn (regexp (regexp-quote "DXUQ array index cannot be negative"))
+(check-exn (regexp (regexp-quote "DXUQ aref index must be a natural number"))
+          (lambda () (aref (list arrV (NumV 4.5)) aref-store)))
+(check-exn (regexp (regexp-quote "DXUQ aref index must be a natural number"))
           (lambda () (aref (list arrV (NumV -1)) aref-store)))
 (check-exn (regexp (regexp-quote "DXUQ array index larger than array size"))
           (lambda () (aref (list arrV (NumV 4)) aref-store)))
+
+
+;Test cases for aset!
+(define aset-store (Store (make-hash) (box 0)))
+(define arr_V (array (list (StringV "test") (BoolV #t) (NumV 45)) aset-store))
+(check-equal? (fetch 1 aset-store) (StringV "test"))
+(check-equal? (aset! (list arr_V (NumV 0) (NumV 122)) aset-store) (NullV))
+(check-equal? (fetch 1 aset-store) (NumV 122))
+(check-equal? (fetch 2 aset-store) (BoolV #t))
+(check-equal? (fetch 3 aset-store) (NumV 45))
+(check-exn (regexp (regexp-quote "DXUQ array index must be a natural number"))
+          (lambda () (aset! (list arr_V (NumV 1.5) (NumV 122)) aset-store)))
+(check-exn (regexp (regexp-quote "DXUQ array index out of bounds"))
+          (lambda () (aset! (list arr_V (NumV 3) (NumV 122)) aset-store)))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments to aset!"))
+          (lambda () (aset! (list (NumV 4) (NumV 3) (NumV 122)) aset-store)))
 
 ;Test cases for allocate
 (define alloc-table (Store (make-hash) (box 0)))
@@ -631,6 +711,7 @@
 (check-equal? (valid-idc 'in) #f)
 (check-equal? (valid-idc 'vars) #f)
 (check-equal? (valid-idc 'lam) #f)
+(check-equal? (valid-idc ':=) #f)
 
 ;Test Cases for serialize
 (check-equal? (serialize (NumV 10)) "10")
@@ -645,6 +726,21 @@
 
 
 ;Test Cases for substring
-(check-equal? (substring1 (list (StringV "Hello") (NumV 1) (NumV 5)) d-store) (StringV "ello"))
-(check-equal? (substring1 (list (StringV "Hello") (NumV 0) (NumV 4)) d-store) (StringV "Hell"))
-(check-equal? (substring1 (list (StringV "Hello") (NumV 0) (NumV 2)) d-store) (StringV "He"))
+(define substring-store (Store (make-hash) (box 0)))
+(check-equal? (substring1 (list (StringV "HELLO") (NumV 0) (NumV 4)) substring-store) (StringV "HELL"))
+(check-equal? (substring1 (list (StringV "HELLO") (NumV 0) (NumV 5)) substring-store) (StringV "HELLO"))
+(check-exn (regexp (regexp-quote "DXUQ Substring Indices need to be natural numbers"))
+           (lambda () (substring1 (list (StringV "HELLO") (NumV -1) (NumV 5)) substring-store)))
+(check-exn (regexp (regexp-quote "DXUQ Left Index must be between 0 and length of string and less than right index"))
+           (lambda () (substring1 (list (StringV "HELLO") (NumV 10) (NumV 20)) substring-store)))
+(check-exn (regexp (regexp-quote "DXUQ Left Index must be between 0 and length of string and less than right index"))
+           (lambda () (substring1 (list (StringV "HELLO") (NumV 4) (NumV 1)) substring-store)))
+(check-exn (regexp (regexp-quote "DXUQ Right Index must be less than length of string"))
+           (lambda () (substring1 (list (StringV "HELLO") (NumV 0) (NumV 6)) substring-store)))
+(check-exn (regexp (regexp-quote "DXUQ Invalid arguments to the substring function"))
+           (lambda () (substring1 (list (NumV 1)) substring-store)))
+
+
+
+
+
