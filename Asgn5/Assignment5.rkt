@@ -28,7 +28,6 @@
 ;define Value
 (define-type Value (U NumV PrimV CloV BoolV StringV NullV ArrayV))
 (struct NumV ([n : Real]) #:transparent)
-;(struct IntV ([n : Integer]) #:transparent)
 (struct BoolV ([b : Boolean]) #:transparent)
 (struct StringV ([str : String]) #:transparent)
 (struct PrimV ([fun : (-> (Listof Value) Store Value)]) #:transparent)
@@ -173,14 +172,15 @@
                  (string-append "DXUQ invalid args to new-array: " (~v args)))]))
 
 
-;Needs to get done
+;;Creates a fresh array given a sequence of values
 (define (array [args : (Listof Value)] [store : Store]) : Value
-  (define sizeOfArray (length args))
   (define arrayVLoc (single-alloc store))
-  (define firstLoc (allocateArrayElements args sizeOfArray store))
-  (ArrayV firstLoc sizeOfArray)
-)
+  (define firstLoc (allocateArrayElements args (length args) store))
+  (define arrayV (ArrayV firstLoc (length args)))
+  (store-set! arrayVLoc arrayV store)
+  arrayV)
 
+;;Allocates space for an array's contents in a store
 (define (allocateArrayElements [args : (Listof Value)] [sizeOfArray : Natural] [store : Store]) : Location
   (cond
     [(equal? sizeOfArray 0) 0]
@@ -190,22 +190,17 @@
      (allocateArrayElements (rest args) (- sizeOfArray 1) store)
      firstLoc]))
 
-
-  
-
-;Done //However has not been tested
-
+;;accesses an item in an array given its index
 (define (aref [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list (? ArrayV? arr) (? NumV? offset))
      (cond
-       [(> (NumV-n offset) (ArrayV-size arr)) (error 'aref "DXUQ Cannot have an offset larger than array size")]
-       [(< (NumV-n offset) 0) (error 'aref "DXUQ Cannot have a negative index in an array")]
-       [else (fetch (+ (ArrayV-startLoc arr) (cast (NumV-n offset) Natural)) store)]
-       )]))
+       [(> (NumV-n offset) (ArrayV-size arr)) (error 'aref "DXUQ array index larger than array size")]
+       [(< (NumV-n offset) 0) (error 'aref "DXUQ array index cannot be negative")]
+       [else (fetch (+ (ArrayV-startLoc arr) (cast (NumV-n offset) Natural)) store)])]))
 
 
-;Done //However has not been tested
+;;sets an item in an array given an index, new value, and the array
 (define (aset! [args : (Listof Value)] [store : Store]) : Value
   (match args
     [(list (? ArrayV? arr) (? NumV? offset) value)
@@ -216,15 +211,12 @@
        [else (store-set! (+ (ArrayV-startLoc arr)  (NumV-n offset)) value store) (NullV)])]
     [else (error 'aset "DXUQ Invalid Arguments")]))
 
-;Done
 ;Called it substring1 because substring was taken by the racket function itself
 (define (substring1 [args : (Listof Value)] [store : Store]) : Value
      (match args
        [(list (? StringV? string) (? NumV? left) (? NumV? right))
         (StringV (substring (StringV-str string) (cast (NumV-n left) Integer)
                                                  (cast (NumV-n right) Integer)))]))
-
-
 
 ;-------------------------------------------------------------------------------------------
 
@@ -235,9 +227,6 @@
   (cond
     [(equal? size 1) first-loc]
     [else (allocate (- size 1) val store) first-loc]))
-
-
-
 
 
 ;-------------------------------------------------------------------------------------------
@@ -377,7 +366,8 @@
                       (Binding 'new-array 10)
                       (Binding 'array 11)
                       (Binding 'aref 12)
-                      (Binding 'substring1 12)))
+                      (Binding 'aset! 13)
+                      (Binding 'substring 14)))
 
 ;;Holds the Number of total primitive functions, for the initial Store table count
 (define NUM_PRIMITIVES (length top-env))
@@ -395,8 +385,10 @@
 (store-set! 8 (BoolV #f) top-store)
 (store-set! 9 (PrimV begin) top-store)
 (store-set! 10 (PrimV new-array) top-store)
-(store-set! 11 (PrimV aref) top-store)
-(store-set! 12 (PrimV substring1) top-store)
+(store-set! 11 (PrimV array) top-store)
+(store-set! 12 (PrimV aref) top-store)
+(store-set! 13 (PrimV aset!) top-store)
+(store-set! 14 (PrimV substring1) top-store)
 
 ;;----------------------------------------------------------------------------------------------
 ;Test Cases
@@ -546,6 +538,34 @@
           (lambda () (new-array (list (NumV 0) (NumV 100)) newarr-store)))
 (check-exn (regexp (regexp-quote "DXUQ invalid args to new-array"))
           (lambda () (new-array (list (BoolV #f) (NumV 100)) newarr-store)))
+
+;Test cases for array
+(define array-store (Store (make-hash) (box 0)))
+(check-equal? (array (list (NumV 10) (BoolV #t)) array-store) (ArrayV 1 2))
+(check-equal? (fetch 0 array-store) (ArrayV 1 2))
+(check-equal? (fetch 1 array-store) (NumV 10))
+(check-equal? (fetch 2 array-store) (BoolV #t))
+
+;Test cases for allocateArrayElements
+(define allocEle-store (Store (make-hash) (box 0)))
+(check-equal? (allocateArrayElements
+               (list (NumV 10) (BoolV #t) (NumV 20)) 3 allocEle-store) 0)
+(check-equal? (fetch 0 allocEle-store) (NumV 10))
+(check-equal? (fetch 1 allocEle-store) (BoolV #t))
+(check-equal? (fetch 2 allocEle-store) (NumV 20))
+(check-equal? (allocateArrayElements
+               (list (NumV 10) (BoolV #t) (NumV 20)) 3 allocEle-store) 3)
+
+;Test cases aref
+(define aref-store (Store (make-hash) (box 0)))
+(define arrV (array (list (NumV 10) (BoolV #t) (NumV 20)) aref-store))
+(check-equal? (aref (list arrV (NumV 0)) aref-store) (NumV 10))
+(check-equal? (aref (list arrV (NumV 1)) aref-store) (BoolV #t))
+(check-equal? (aref (list arrV (NumV 2)) aref-store) (NumV 20))
+(check-exn (regexp (regexp-quote "DXUQ array index cannot be negative"))
+          (lambda () (aref (list arrV (NumV -1)) aref-store)))
+(check-exn (regexp (regexp-quote "DXUQ array index larger than array size"))
+          (lambda () (aref (list arrV (NumV 4)) aref-store)))
 
 ;Test cases for allocate
 (define alloc-table (Store (make-hash) (box 0)))
