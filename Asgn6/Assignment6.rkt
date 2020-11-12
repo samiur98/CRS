@@ -1,4 +1,4 @@
-;Assignment 4: DXUQ4 Parser and Interpreter with multiple arguments.
+;Assignment 6: DXUQ6 Type Checking and Recursion.
 
 ;The project has been finished. All functions have been implemented and they
 ;have been tested by suites of test cases that test all main functions as well
@@ -47,7 +47,7 @@
 
 ;-------------------------------------------------------------------------------------------
 
-;;Evaluates a given an S-Expression as a DXUQ4 expression, returns a value as a string
+;;Evaluates a given an S-Expression as a DXUQ6 expression, returns a value as a string
 (define (top-interp [sexps : Sexp]) : String
   (define AST (parse sexps))
   (type-check AST base-tenv)
@@ -92,7 +92,21 @@
          ;evaluate the function body
          (interp body new-env)]
         
-        [else (error 'interp (string-append "DXUQ invalid function call: " (~v funval)))])]))
+        [else (error 'interp (string-append "DXUQ invalid function call: " (~v funval)))])]
+     
+     [(RecC name def retType use)
+      
+      ;add recursive function name to environment with a temporary value
+      (define new-env (env-extend name (NumV 0) env))
+
+      ;interp the recursive function body to get a CloV
+      (define clo-val (interp def new-env))
+
+      ;Mutate environment with correct function value
+      (env-set! name clo-val new-env)
+
+      ;interp the expression that uses the function, using the new env
+      (interp use new-env)]))
 
 
 ;;----------------------------------------------------------------------------------------------
@@ -134,8 +148,7 @@
             (error 'type-check "DXUQ recursive function return type does not match expected")])
      (type-check use new-tenv)]))
 
-
-;;Verifies that a function application is given the correct parameter types
+;;Verifies that a function application is given the correct parameter types, true if correct
 (define (verify-all-arg-types [paramTypes : (Listof Type)]
                           [args : (Listof ExprC)]
                           [tenv : TypeEnv]) : Boolean
@@ -147,7 +160,7 @@
      (verify-arg-type (first paramTypes) (first args) tenv)
      (verify-all-arg-types (rest paramTypes) (rest args) tenv)]))
 
-;;Verifies that a single parameter and argument are of the same type
+;;Verifies that a single parameter and argument are of the same type, returns true if they are
 (define (verify-arg-type [paramType : Type] [arg : ExprC] [tenv : TypeEnv]) : Boolean
   (define arg-type (type-check arg tenv))
   (cond
@@ -172,7 +185,7 @@
                     [else "false"])]))
 
 ;-------------------------------------------------------------------------------------------
-;define Arithmetic functions
+;define primitive functions
 
 ;;primitive addition - adds two NumV's together
 (define (add [args : (Listof Value)]) : Value
@@ -208,13 +221,13 @@
     [(list (NumV left) (NumV right)) (BoolV (<= left right))]
     [else (error '+ (string-append "DXUQ invalid arguments passed to <=: " (~v args)))]))
 
-;;primitive equality - compare two NumV's with equal?
+;;primitive number equality - compare two NumV's with equal?
 (define (num-eq? [args : (Listof Value)]) : Value
   (match args
     [(list (? NumV? left) (? NumV? right)) (BoolV (equal? left right))]
     [else (error '+ (string-append "DXUQ invalid arguments passed to num-eq?: " (~v args)))]))
 
-;;primitive equality - compare two NumV's with equal?
+;;primitive string equality - compare two StringV's with equal?
 (define (str-eq? [args : (Listof Value)]) : Value
   (match args
     [(list (? StringV? left) (? StringV? right)) (BoolV (equal? left right))]
@@ -239,7 +252,18 @@
 
 ;-------------------------------------------------------------------------------------------
 
+;;sets the value of an id in a given environment
+(define (env-set! [id : Symbol] [newVal : Value] [env : Env]) : Void
+  (cond
+    [(empty? env)
+     (error 'env-set! (string-append "DXUQ unbound identifier: " (~a id)))]
+    [(equal? id (Binding-id (first env))) (set-box! (Binding-val (first env)) newVal)]
+    [else (env-set! id newVal (rest env))]))
+
+;-------------------------------------------------------------------------------------------
+
 ;;Given a list of identifiers and a list of values, adds each identifier-value pair to an env
+;;returns the new env
 (define (env-extend-all [ids : (Listof Symbol)] [args : (Listof (Boxof Value))] [env : Env]) : Env
   (cond
     [(empty? ids) env]
@@ -250,13 +274,13 @@
 
 ;-------------------------------------------------------------------------------------------
 
-;;Adds a single binding to an environment
+;;Adds a single binding to an environment, returns new env
 (define (env-extend [param : Symbol] [arg : Value] [env : Env]) : Env
   (cons (Binding param (box arg)) env))
 
 ;-------------------------------------------------------------------------------------------
 
-;;grabs the type of an id in a given type environment
+;;returns the type of an id in a given type environment
 (define (tenv-lookup [id : Symbol] [tenv : TypeEnv]) : Type
   (cond
     [(empty? tenv)
@@ -266,7 +290,8 @@
 
 ;-------------------------------------------------------------------------------------------
 
-;;Given a list of identifiers and a list of values, adds each identifier-value pair to an env
+;;Given a list of identifiers and a list of values, adds each identifier-value pair to a tenv
+;;returns new tenv
 (define (tenv-extend-all [ids : (Listof Symbol)]
                          [types : (Listof Type)]
                          [tenv : TypeEnv]) : TypeEnv
@@ -279,13 +304,13 @@
 
 ;-------------------------------------------------------------------------------------------
 
-;;Adds a single binding to an environment
+;;Adds a single binding to an environment, returns new tenv
 (define (tenv-extend [param : Symbol] [type : Type] [tenv : TypeEnv]) : TypeEnv
   (cons (TypeBinding param type) tenv))
 
 ;-----------------------------------------------------------------------------------------
 
-;;Given an SExpression, parse returns an ExprC struct representing the SExpression
+;;Given an SExpression, returns an ExprC struct representing the SExpression
 (define (parse [s : Sexp]) : ExprC
  (match s
    [(? real? a) (NumC a)]
@@ -313,13 +338,9 @@
                 (parse use))]
    [(list fun args ...) (AppC (parse fun) (map parse args))]
    [else (error 'parse (string-append "DXUQ invalid input to parse: " (~a s)))]))
+                                         
 
-
-
-                                          
-
-
-;;Parse a type s-expression
+;;Parse an s-expression that holds a Type
 (define (parse-type [s : Sexp]) : Type
   (match s
     ['num (NumT)]
@@ -394,7 +415,7 @@
 
 ;;----------------------------------------------------------------------------------------------
 
-;define top-env, loaded with primitive values, passed in to interp
+;define top-env, loaded with primitive values, passed to interp
 (define top-env (list (Binding '+ (box (PrimV add)))
                       (Binding '* (box (PrimV multiply)))
                       (Binding '/ (box (PrimV divide)))
@@ -434,6 +455,11 @@
 (check-equal? (top-interp '{{fn {[num y]}
                                 {{fn {[{-> num} fun] [num y]}
                                      {fun}} {fn {} y} 100}} 1}) "1")
+(check-equal? (top-interp '{rec {{fact [num x]} : num
+                                                {if {<= x 1}
+                                                    1
+                                                    {* x {fact {- x 1}}}}}
+                             {fact 5}}) "120")
 (check-equal? (top-interp '{let {num x = 10} {num y = 2} in {* x y}}) "20")
 (check-equal? (top-interp '{let {num x = {/ 144 12}} {num y = {* 2 3}} in {* x y}}) "72")
 (check-equal? (top-interp 'true) "true")
@@ -535,6 +561,15 @@
 (check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
           (lambda () (env-lookup 'x (list (Binding 'y (box (NumV 4)))))))
 
+;Test cases for env-set!
+(define test-env (list (Binding 'var1 (box (NumV 4)))
+                       (Binding 'var2 (box (BoolV #t)))))
+(check-equal? (env-lookup 'var1 test-env) (NumV 4))
+(env-set! 'var1 (StringV "test") test-env)
+(check-equal? (env-lookup 'var1 test-env) (StringV "test"))
+(check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
+          (lambda () (env-set! 'x (NumV 5) test-env)))
+
 ;Test cases for env-extend
 (check-equal? (env-extend 'var (NumV 4) (list (Binding 'x (box (NumV 10)))))
               (list (Binding 'var (box (NumV 4))) (Binding 'x (box (NumV 10)))))
@@ -621,6 +656,11 @@
 (check-equal? (parse '{let {num z = {+ 9 14}} {num y = 98} in {+ z y}})
               (AppC (LamC '(z y) (list (NumT)(NumT)) (AppC (IdC '+) (list (IdC 'z) (IdC 'y))))
                     (list (AppC (IdC '+) (list (NumC 9) (NumC 14))) (NumC 98))))
+(check-equal? (parse '{rec {{addition [num x] [num y]} : num {addition y x}} {addition 5 10}})
+              (RecC 'addition (LamC (list 'x 'y) (list (NumT) (NumT))
+                                    (AppC (IdC 'addition) (list (IdC 'y) (IdC 'x))))
+                                          (NumT)
+                                    (AppC (IdC 'addition) (list (NumC 5) (NumC 10)))))
 (check-exn (regexp (regexp-quote "DXUQ invalid identifier: in"))
           (lambda () (parse '{{fn {[num in] [num y]} {* in y}} 2 16})))
 (check-exn (regexp (regexp-quote "DXUQ invalid input to parse: ()"))
@@ -701,11 +741,3 @@
                (CloV '(x y)
                      (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env))
               "#<procedure>")
-
-
-
-(check-equal? (parse '{rec {{addition [num x] [num y]} : num {addition y x}} {addition 5 10}})
-              (RecC 'addition (LamC (list 'x 'y) (list (NumT) (NumT))
-                                    (AppC (IdC 'addition) (list (IdC 'y) (IdC 'x))))
-                                          (NumT)
-                                    (AppC (IdC 'addition) (list (NumC 5) (NumC 10)))))
