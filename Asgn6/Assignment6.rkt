@@ -50,7 +50,7 @@
 ;;Evaluates a given an S-Expression as a DXUQ4 expression, returns a value as a string
 (define (top-interp [sexps : Sexp]) : String
   (define AST (parse sexps))
-  (type-check AST top-tenv)
+  (type-check AST base-tenv)
   (serialize (interp AST top-env)))
 
 ;-----------------------------------------------------------------------------------------
@@ -101,8 +101,11 @@
 (define (type-check [expr : ExprC] [tenv : TypeEnv]) : Type
   (match expr
     [(NumC n) (NumT)]
+    
     [(StringC str) (StringT)]
+    
     [(IdC id) (tenv-lookup id tenv)]
+    
     [(IfC test then else)
      (define then-type (type-check then tenv))
      (cond
@@ -111,13 +114,26 @@
        [(not (equal? (type-check else tenv) then-type))
         (error 'type-check "DXUQ if 'then' and 'else' must return the same type")])
      then-type]
+    
     [(LamC params types body)
      (FunT types (type-check body (tenv-extend-all params types tenv)))]
+
     [(AppC fun args)
      (define fun-type (type-check fun tenv))
-     (cond [(not (FunT? fun-type)) (error 'type-check "DXUQ invalid function call")])
+     (cond [(not (FunT? fun-type))
+            (error 'type-check (string-append "DXUQ invalid function call: " (~v fun)))])
      (verify-all-arg-types (FunT-paramTypes fun-type) args tenv)
-     (FunT-retType fun-type)]))
+     (FunT-retType fun-type)]
+
+    [(RecC name def retType use)
+     (define new-tenv
+       (tenv-extend name (FunT (LamC-types def) retType) tenv))
+     (define body-type
+       (type-check (LamC-body def) (tenv-extend-all (LamC-params def) (LamC-types def) new-tenv)))
+     (cond [(not (equal? body-type retType))
+            (error 'type-check "DXUQ recursive function return type does not match expected")])
+     (type-check use new-tenv)]))
+
 
 ;;Verifies that a function application is given the correct parameter types
 (define (verify-all-arg-types [paramTypes : (Listof Type)]
@@ -193,10 +209,16 @@
     [else (error '+ (string-append "DXUQ invalid arguments passed to <=: " (~v args)))]))
 
 ;;primitive equality - compare two NumV's with equal?
-(define (eq [args : (Listof Value)]) : Value
+(define (num-eq? [args : (Listof Value)]) : Value
   (match args
-    [(list left right) (BoolV (equal? left right))]
-    [else (error '+ (string-append "DXUQ invalid arguments passed to equal?: " (~v args)))]))
+    [(list (? NumV? left) (? NumV? right)) (BoolV (equal? left right))]
+    [else (error '+ (string-append "DXUQ invalid arguments passed to num-eq?: " (~v args)))]))
+
+;;primitive equality - compare two NumV's with equal?
+(define (str-eq? [args : (Listof Value)]) : Value
+  (match args
+    [(list (? StringV? left) (? StringV? right)) (BoolV (equal? left right))]
+    [else (error '+ (string-append "DXUQ invalid arguments passed to str-eq?: " (~v args)))]))
 
 ;;signals a user error
 (define (user-error [args : (Listof Value)]) : Value
@@ -304,7 +326,8 @@
     ['bool (BoolT)]
     ['str (StringT)]
     [(list p-types ... '-> ret-type)
-     (FunT (map parse-type (cast p-types (Listof Sexp))) (parse-type ret-type))]))
+     (FunT (map parse-type (cast p-types (Listof Sexp))) (parse-type ret-type))]
+    [else (error 'parse-type (string-append "DXUQ invalid type:" (~a s)))]))
 
 
 ;;Desugars a 'let' s-expression into an AppC
@@ -377,17 +400,20 @@
                       (Binding '/ (box (PrimV divide)))
                       (Binding '- (box (PrimV subtract)))
                       (Binding '<= (box (PrimV leq)))
-                      (Binding 'equal? (box (PrimV eq)))
+                      (Binding 'num-eq? (box (PrimV num-eq?)))
+                      (Binding 'str-eq? (box (PrimV str-eq?)))
                       (Binding 'error (box (PrimV user-error)))
                       (Binding 'true (box (BoolV #t)))
                       (Binding 'false (box (BoolV #f)))))
 
-;define top-tenv, loaded with types for primitive values, passed to type-check
-(define top-tenv (list (TypeBinding '+ (FunT (list (NumT) (NumT)) (NumT)))
+;define base-tenv, loaded with types for primitive values, passed to type-check
+(define base-tenv (list (TypeBinding '+ (FunT (list (NumT) (NumT)) (NumT)))
                        (TypeBinding '* (FunT (list (NumT) (NumT)) (NumT)))
                        (TypeBinding '/ (FunT (list (NumT) (NumT)) (NumT)))
                        (TypeBinding '- (FunT (list (NumT) (NumT)) (NumT)))
                        (TypeBinding '<= (FunT (list (NumT) (NumT)) (BoolT)))
+                       (TypeBinding 'num-eq? (FunT (list (NumT) (NumT)) (BoolT)))
+                       (TypeBinding 'str-eq? (FunT (list (StringT) (StringT)) (BoolT)))
                        (TypeBinding 'true (BoolT))
                        (TypeBinding 'false (BoolT))))
 
@@ -416,12 +442,14 @@
 (check-equal? (top-interp '{if false 10 20}) "20")
 (check-equal? (top-interp '"testing") "testing")
 (check-equal? (top-interp '{<= 10 20}) "true")
-;(check-equal? (top-interp '{equal? 10 20}) "false")
-;(check-equal? (top-interp '{equal? 20 20}) "true")
+(check-equal? (top-interp '{num-eq? 10 20}) "false")
+(check-equal? (top-interp '{num-eq? 20 20}) "true")
+(check-equal? (top-interp '{str-eq? "hello" "hello"}) "true")
+(check-equal? (top-interp '{str-eq? "hi" "hii"}) "false")
 (check-exn (regexp (regexp-quote "DXUQ duplicate parameter: x"))
           (lambda () (top-interp '{{fn {[num x] [num x]} {+ x x}} 20 30})))
-#;(check-exn (regexp (regexp-quote "DXUQ invalid syntax for if"))
-          (lambda () (top-interp '{if {equal? 10 10} 5})))
+(check-exn (regexp (regexp-quote "DXUQ invalid syntax for if"))
+          (lambda () (top-interp '{if {num-eq? 10 10} 5})))
 (check-exn (regexp (regexp-quote "DXUQ incorrect number of arguments passed to function"))
           (lambda () (top-interp '{{fn {[num x]} {+ x 1}} 20 20})))
 (check-exn (regexp (regexp-quote "DXUQ invalid function call"))
@@ -465,18 +493,28 @@
 (check-equal? (type-check (StringC "str") '()) (StringT))
 (check-equal? (type-check (AppC (IdC '+)
                                 (list (NumC 5) (AppC (IdC '/) (list (NumC 100) (NumC 2)))))
-                          top-tenv) (NumT))
+                          base-tenv) (NumT))
 (check-equal? (type-check (IdC 'x)
                           (list(TypeBinding 'y (NumT))(TypeBinding 'x (BoolT))))(BoolT))
-(check-equal? (type-check (IfC (IdC 'true)(StringC "then")(StringC "else")) top-tenv)(StringT))
+(check-equal? (type-check (IfC (IdC 'true)(StringC "then")(StringC "else")) base-tenv)(StringT))
 (check-equal? (type-check (LamC '(x) (list (NumT)) (AppC (IdC '+) (list (IdC 'x) (NumC 1))))
-                          top-tenv)(FunT (list (NumT)) (NumT)))
+                          base-tenv)(FunT (list (NumT)) (NumT)))
+(check-equal? (type-check (RecC 'recurs
+                                (LamC '(x) (list (NumT)) (AppC (IdC 'recurs) (list (IdC 'x))))
+                                (NumT)
+                                (AppC (IdC 'recurs) (list (NumC 5))))
+                          base-tenv) (NumT))
 (check-exn (regexp (regexp-quote "DXUQ if condition not a boolean"))
           (lambda () (type-check (IfC (NumC 5) (StringC "then") (StringC "else"))'())))
 (check-exn (regexp (regexp-quote "DXUQ if 'then' and 'else' must return the same type"))
-          (lambda () (type-check (IfC (IdC 'true) (StringC "then") (NumC 10)) top-tenv)))
+          (lambda () (type-check (IfC (IdC 'true) (StringC "then") (NumC 10)) base-tenv)))
 (check-exn (regexp (regexp-quote "DXUQ invalid function call"))
-          (lambda () (type-check (AppC (NumC 5) '()) top-tenv)))
+          (lambda () (type-check (AppC (NumC 5) '()) base-tenv)))
+(check-exn (regexp (regexp-quote "DXUQ recursive function return type does not match expected"))
+          (lambda () (type-check (RecC 'recurs
+                                (LamC '(x) (list (NumT)) (StringC "abc"))
+                                (NumT)
+                                (AppC (IdC 'recurs) (list (NumC 5)))) base-tenv)))
 
 ;Test cases for verify-all-arg-types
 (check-equal? (verify-all-arg-types (list (NumT) (StringT))
@@ -547,15 +585,21 @@
 (check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to <="))
           (lambda () (leq (list (NumV 4) (NumV 10) (BoolV #t)))))
 
-;Test cases for eq
-(check-equal? (eq (list (NumV 12) (NumV 12))) (BoolV #t))
-(check-equal? (eq (list (StringV "test1") (StringV "test1"))) (BoolV #t))
-(check-equal? (eq (list (BoolV #t) (BoolV #t))) (BoolV #t))
-(check-equal? (eq (list (StringV "test1") (StringV "test2"))) (BoolV #f))
-(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to equal?"))
-          (lambda () (eq (list (NumV 4) (NumV 10) (NumV 12)))))
-(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to equal?"))
-          (lambda () (eq (list (NumV 10) (NumV 10) (NumV 10)))))
+;Test cases for num-eq?
+(check-equal? (num-eq? (list (NumV 12) (NumV 12))) (BoolV #t))
+(check-equal? (num-eq? (list (NumV 12) (NumV 11))) (BoolV #f))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to num-eq?"))
+          (lambda () (num-eq? (list (NumV 4) (NumV 10) (NumV 12)))))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to num-eq?"))
+          (lambda () (num-eq? (list (NumV 4) (BoolV #t)))))
+
+;Test cases for str-eq?
+(check-equal? (str-eq? (list (StringV "test1") (StringV "test1"))) (BoolV #t))
+(check-equal? (str-eq? (list (StringV "test1") (StringV "test2"))) (BoolV #f))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to str-eq?"))
+          (lambda () (str-eq? (list (StringV "test1") (StringV "test1") (StringV "test1")))))
+(check-exn (regexp (regexp-quote "DXUQ invalid arguments passed to str-eq?"))
+          (lambda () (str-eq? (list (StringV "test1") (NumV 4)))))
 
 ;Test cases for error
 (check-exn (regexp (regexp-quote "user-error: DXUQ bad data"))
@@ -596,6 +640,8 @@
               (FunT (list (FunT (list (StringT)) (BoolT))) (NumT)))
 (check-equal? (parse-type '{-> num})
               (FunT '() (NumT)))
+(check-exn (regexp (regexp-quote "DXUQ invalid type"))
+          (lambda () (parse-type '{num -> 14})))
 
 ;Test Cases for desugar-let
 (check-equal? (desugar-let (list '(num z = 4)) '(+ z 1))
