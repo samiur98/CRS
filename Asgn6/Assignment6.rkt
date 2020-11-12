@@ -68,7 +68,9 @@
      [(IfC test then else) (match (interp test env)
                              [(BoolV #t) (interp then env)]
                              [(BoolV #f) (interp else env)]
-                             [else (error 'interp "DXUQ if condition is not a boolean")])]
+                             [else (error 'interp (string-append
+                                                   "DXUQ if condition is not a boolean: "
+                                                   (~v test)))])]
 
      [(LamC param types body) (CloV param body env)]
      
@@ -124,9 +126,12 @@
      (define then-type (type-check then tenv))
      (cond
        [(not (BoolT? (type-check test tenv)))
-        (error 'type-check "DXUQ if condition not a boolean")]
+        (error 'type-check (string-append "DXUQ if condition not a boolean: " (~v test)))]
        [(not (equal? (type-check else tenv) then-type))
-        (error 'type-check "DXUQ if 'then' and 'else' must return the same type")])
+        (error 'type-check (string-append
+                            "DXUQ if 'then' and 'else' must return the same type: "
+                            "then: " (~v then)
+                            " -- else: " (~v else)))])
      then-type]
     
     [(LamC params types body)
@@ -145,7 +150,10 @@
      (define body-type
        (type-check (LamC-body def) (tenv-extend-all (LamC-params def) (LamC-types def) new-tenv)))
      (cond [(not (equal? body-type retType))
-            (error 'type-check "DXUQ recursive function return type does not match expected")])
+            (error 'type-check (string-append
+                                "DXUQ recursive function return type does not match expected: "
+                                "  expected: " (~v retType)
+                                " -- actual: " (~v (LamC-body def))))])
      (type-check use new-tenv)]))
 
 ;;Verifies that a function application is given the correct parameter types, true if correct
@@ -154,7 +162,10 @@
                           [tenv : TypeEnv]) : Boolean
   (cond
     [(not (equal? (length paramTypes) (length args)))
-     (error 'verify-arg-types "DXUQ incorrect number of arguments passed to function")]
+     (error 'verify-arg-types (string-append
+                               "DXUQ incorrect number of arguments passed to function: "
+                               "expected: " (~a (length paramTypes))
+                               " -- actual: " (~a (length args))))]
     [(equal? (length paramTypes) 0)]
     [else
      (verify-arg-type (first paramTypes) (first args) tenv)
