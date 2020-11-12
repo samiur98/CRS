@@ -13,17 +13,18 @@
 ; Data Definitions:
 
 ;Creating the data-types of both the ExprC and the FunDefC
-(define-type ExprC (U NumC IdC AppC LamC IfC StringC))
+(define-type ExprC (U NumC IdC AppC LamC IfC StringC RecC))
 (struct NumC ([n : Real]) #:transparent)
 (struct IdC ([s : Symbol]) #:transparent)
 (struct AppC ([fun : ExprC] [args : (Listof ExprC)]) #:transparent)
 (struct LamC ([params : (Listof Symbol)] [types : (Listof Type)] [body : ExprC]) #:transparent)
 (struct IfC ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
 (struct StringC ([str : String]) #:transparent)
+(struct RecC ([funName : Symbol] [def : LamC] [output : Type] [use : ExprC]) #:transparent)
 
 ;define Environment
 (define-type Env (Listof Binding))
-(struct Binding ((id : Symbol) (val : Value)) #:transparent)
+(struct Binding ((id : Symbol) (val : (Boxof Value))) #:transparent)
 
 ;define TypeEnvironment
 (define-type TypeEnv (Listof TypeBinding))
@@ -83,7 +84,7 @@
         [(CloV params body clo-env)
 
          ;evaluate arguments (eager)
-         (define arg_vals (map (λ ([x : ExprC]) (interp x env)) args))
+         (define arg_vals (map (λ ([x : ExprC]) (box (interp x env))) args))
 
          ;extend CloV environment with parameters
          (define new-env (env-extend-all params arg_vals clo-env))
@@ -211,25 +212,25 @@
   (cond
     [(empty? env)
      (error 'env-lookup (string-append "DXUQ unbound identifier: " (~a id)))]
-    [(equal? id (Binding-id (first env))) (Binding-val (first env))]
+    [(equal? id (Binding-id (first env))) (unbox (Binding-val (first env)))]
     [else (env-lookup id (rest env))]))
 
 ;-------------------------------------------------------------------------------------------
 
 ;;Given a list of identifiers and a list of values, adds each identifier-value pair to an env
-(define (env-extend-all [ids : (Listof Symbol)] [args : (Listof Value)] [env : Env]) : Env
+(define (env-extend-all [ids : (Listof Symbol)] [args : (Listof (Boxof Value))] [env : Env]) : Env
   (cond
     [(empty? ids) env]
     [else (env-extend-all
            (rest ids)
            (rest args)
-           (env-extend (first ids) (first args) env))]))
+           (env-extend (first ids) (unbox (first args)) env))]))
 
 ;-------------------------------------------------------------------------------------------
 
 ;;Adds a single binding to an environment
 (define (env-extend [param : Symbol] [arg : Value] [env : Env]) : Env
-  (cons (Binding param arg) env))
+  (cons (Binding param (box arg)) env))
 
 ;-------------------------------------------------------------------------------------------
 
@@ -281,8 +282,19 @@
       [(equal? (length exprs) 3)
        (IfC (parse (first exprs)) (parse (second exprs)) (parse (third exprs)))]
       [else (error 'parse (string-append "DXUQ invalid syntax for if: " (~a s)))])]
+   [(list 'rec (list (list (? symbol? name) (? list? params) ...) ': retType body) use)
+          (RecC name
+                (LamC (validate-params (map get-param-name (cast params (Listof Sexp))))
+                      (map get-param-type (cast params (Listof Sexp)))
+                      (parse body))
+                (parse-type retType)
+                (parse use))]
    [(list fun args ...) (AppC (parse fun) (map parse args))]
    [else (error 'parse (string-append "DXUQ invalid input to parse: " (~a s)))]))
+
+
+
+                                          
 
 
 ;;Parse a type s-expression
@@ -360,15 +372,15 @@
 ;;----------------------------------------------------------------------------------------------
 
 ;define top-env, loaded with primitive values, passed in to interp
-(define top-env (list (Binding '+ (PrimV add))
-                      (Binding '* (PrimV multiply))
-                      (Binding '/ (PrimV divide))
-                      (Binding '- (PrimV subtract))
-                      (Binding '<= (PrimV leq))
-                      (Binding 'equal? (PrimV eq))
-                      (Binding 'error (PrimV user-error))
-                      (Binding 'true (BoolV #t))
-                      (Binding 'false (BoolV #f))))
+(define top-env (list (Binding '+ (box (PrimV add)))
+                      (Binding '* (box (PrimV multiply)))
+                      (Binding '/ (box (PrimV divide)))
+                      (Binding '- (box (PrimV subtract)))
+                      (Binding '<= (box (PrimV leq)))
+                      (Binding 'equal? (box (PrimV eq)))
+                      (Binding 'error (box (PrimV user-error)))
+                      (Binding 'true (box (BoolV #t)))
+                      (Binding 'false (box (BoolV #f)))))
 
 ;define top-tenv, loaded with types for primitive values, passed to type-check
 (define top-tenv (list (TypeBinding '+ (FunT (list (NumT) (NumT)) (NumT)))
@@ -479,19 +491,19 @@
           (lambda () (verify-arg-type (BoolT) (NumC 5) '())))
 
 ;Test cases for env-lookup
-(check-equal? (env-lookup 'var (list (Binding 'var (NumV 4)))) (NumV 4))
+(check-equal? (env-lookup 'var (list (Binding 'var (box (NumV 4))))) (NumV 4))
 (check-equal? (env-lookup 'true top-env) (BoolV #t))
 (check-equal? (env-lookup 'false top-env) (BoolV #f))
 (check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
-          (lambda () (env-lookup 'x (list (Binding 'y (NumV 4))))))
+          (lambda () (env-lookup 'x (list (Binding 'y (box (NumV 4)))))))
 
 ;Test cases for env-extend
-(check-equal? (env-extend 'var (NumV 4) (list (Binding 'x (NumV 10))))
-              (list (Binding 'var (NumV 4)) (Binding 'x (NumV 10))))
+(check-equal? (env-extend 'var (NumV 4) (list (Binding 'x (box (NumV 10)))))
+              (list (Binding 'var (box (NumV 4))) (Binding 'x (box (NumV 10)))))
 
 ;Test cases for env-extend-all
-(check-equal? (env-extend-all '(x y) (list (NumV 4) (NumV 5)) '())
-              (list (Binding 'y (NumV 5)) (Binding 'x (NumV 4))))
+(check-equal? (env-extend-all '(x y) (list (box (NumV 4)) (box (NumV 5))) '())
+              (list (Binding 'y (box (NumV 5))) (Binding 'x (box (NumV 4)))))
 
 ;Test cases for tenv-lookup
 (check-exn (regexp (regexp-quote "DXUQ unbound identifier: x"))
@@ -643,3 +655,11 @@
                (CloV '(x y)
                      (AppC (IdC '+) (list (NumC 4) (NumC 5))) top-env))
               "#<procedure>")
+
+
+
+(check-equal? (parse '{rec {{addition [num x] [num y]} : num {addition y x}} {addition 5 10}})
+              (RecC 'addition (LamC (list 'x 'y) (list (NumT) (NumT))
+                                    (AppC (IdC 'addition) (list (IdC 'y) (IdC 'x))))
+                                          (NumT)
+                                    (AppC (IdC 'addition) (list (NumC 5) (NumC 10)))))
