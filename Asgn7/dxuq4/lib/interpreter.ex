@@ -127,4 +127,46 @@ defmodule Dxuq4 do
     end
   end
 
+
+
+  @spec subtract(list(value)) :: value
+  def subtract(args) do
+
+    case args do
+
+      [%{val: left}, %{val: right}] ->
+        %NumV{val: left - right}
+
+      _ ->
+        raise "DXUQ invalid args passed to -"
+    end
+  end
+
+  @spec multiply(list(value)) :: value
+  def multiply(args) do
+
+    case args do
+
+      [%{val: left}, %{val: right}] ->
+        %NumV{val: left * right}
+
+      _ ->
+        raise "DXUQ invalid args passed to *"
+    end
+  end
+
+  @spec divide(list(value)) :: value
+  def divide(args) do
+
+    case args do
+
+      [%{val: left}, %{val: right}] ->
+        %NumV{val: left / right}
+
+      _ ->
+        raise "DXUQ invalid args passed to /"
+    end
+  end
+
+
 end
