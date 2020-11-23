@@ -11,6 +11,9 @@ defmodule InterpreterTest do
 
   @topEnv [
     %{id: :+, val: %PrimV{pfun: &Dxuq4.add/1}}
+    %{id: :-, val: %PrimV{pfun: &Dxuq4.subtract/1}}
+    %{id: :*, val: %PrimV{pfun: &Dxuq4.multiply/1}}
+    %{id: :/, val: %PrimV{pfun: &Dxuq4.divide/1}}
   ]
 
   test "test interp with NumC" do
@@ -27,7 +30,10 @@ defmodule InterpreterTest do
   end
 
   test "test interp with primitives" do
-    assert interp(%AppC{fun: %IdC{id: :+}, args: [%NumC{val: 10}, %NumC{val: 20}]}, @topEnv) == %NumV{val: 30}
+    assert interp(%AppC{fun: %IdC{id: :+}, args: [%NumC{val: 20}, %NumC{val: 10}]}, @topEnv) == %NumV{val: 30}
+    assert interp(%AppC{fun: %IdC{id: :-}, args: [%NumC{val: 20}, %NumC{val: 10}]}, @topEnv) == %NumV{val: 10}
+    assert interp(%AppC{fun: %IdC{id: :*}, args: [%NumC{val: 20}, %NumC{val: 10}]}, @topEnv) == %NumV{val: 200}
+    assert interp(%AppC{fun: %IdC{id: :/}, args: [%NumC{val: 20}, %NumC{val: 10}]}, @topEnv) == %NumV{val: 2}
   end
 
   test "test environment lookup" do
