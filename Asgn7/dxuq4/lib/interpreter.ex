@@ -3,11 +3,11 @@ defmodule Dxuq4 do
   Documentation for `Dxuq4`.
   """
 
-  alias Dxuq4.{NumC, IdC, Binding, NumV}
+  alias Dxuq4.{NumC, IdC, AppC, Binding, NumV}
 
-  @type exprC :: NumC.t() | IdC.t()
+  @type exprC :: NumC.t() | IdC.t() | AppC.t()
   @type environment :: list(Binding.t)
-  @type value :: NumV.t
+  @type value :: NumV.t | PrimV.t
 
   defmodule NumC do
     defstruct val:
@@ -17,6 +17,11 @@ defmodule Dxuq4 do
   defmodule IdC do
     defstruct id:
     @type t :: %IdC{id: atom}
+  end
+
+  defmodule AppC do
+    defstruct [:fun, :args]
+    @type t :: %AppC{fun: Dxuq4.exprC, args: list(Dxuq4.exprC)}
   end
 
   defmodule Binding do
@@ -29,6 +34,11 @@ defmodule Dxuq4 do
     @type t :: %NumV{val: float}
   end
 
+  defmodule PrimV do
+    defstruct pfun:
+    @type t :: %PrimV{pfun: (list(Dxuq4.value) -> Dxuq4.value)}
+  end
+
 
   @doc """
   Interp
@@ -37,11 +47,26 @@ defmodule Dxuq4 do
   def interp(expr, env) do
     case expr do
 
-      %{val: value} ->
-        value
+      %NumC{val: num} ->
+        %NumV{val: num}
 
-      %{id: id} ->
+      %IdC{id: id} ->
         lookup(id, env)
+
+      %AppC{fun: fun, args: args} ->
+
+        fun_val = interp(fun, env)
+
+        case fun_val do
+
+          %{pfun: pfun} ->
+
+            pfun.(Enum.map(args, fn a -> interp(a, env) end))
+
+          _ ->
+            raise "DXUQ invalid function call"
+
+        end
 
       _ ->
         nil
@@ -84,4 +109,22 @@ defmodule Dxuq4 do
     [firstArg | restArgs] = args
     extendAllEnv(restIds, restArgs, extendEnv(firstId, firstArg, env))
   end
+
+
+  #-----------------------------------------------------------
+  #Primitive Functions
+
+  @spec add(list(value)) :: value
+  def add(args) do
+
+    case args do
+
+      [%{val: left}, %{val: right}] ->
+        %NumV{val: left + right}
+
+      _ ->
+        raise "DXUQ invalid args passed to +"
+    end
+  end
+
 end
