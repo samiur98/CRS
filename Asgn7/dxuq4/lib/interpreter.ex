@@ -67,4 +67,21 @@ defmodule Dxuq4 do
         lookup(id, tail)
     end
   end
+
+  @spec extendEnv(atom, value, environment) :: environment
+  def extendEnv(id, val, env) do
+    [%Binding{id: id, val: val}] ++ env
+  end
+
+  @spec extendAllEnv(list(atom), list(value), environment) :: environment
+  def extendAllEnv(ids, _args, env) when ids == [] do
+    env
+  end
+
+  @spec extendAllEnv(list(atom), list(value), environment) :: environment
+  def extendAllEnv(ids, args, env) do
+    [firstId | restIds] = ids
+    [firstArg | restArgs] = args
+    extendAllEnv(restIds, restArgs, extendEnv(firstId, firstArg, env))
+  end
 end

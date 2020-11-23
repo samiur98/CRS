@@ -9,11 +9,6 @@ defmodule InterpreterTest do
     assert Dxuq4.interp(expr, []) == 127
   end
 
-  # test "test interp with IdC" do
-  #   expr = %IdC{id: :var}
-  #   assert Dxuq4.interp(expr) == :var
-  # end
-
   test "test interp with IdC" do
     env = [%Binding{id: :var, val:  %NumV{val: 10}}]
     expr1 = %IdC{id: :var}
@@ -29,6 +24,22 @@ defmodule InterpreterTest do
     assert Dxuq4.lookup(:var, env).val == 10
     assert Dxuq4.lookup(:x, env).val == 5
     assert_raise(RuntimeError, "DXUQ unbound identifier", fn() -> Dxuq4.lookup(:y, env) end)
+  end
+
+  test "test extendEnv" do
+    env = []
+    assert_raise(RuntimeError, "DXUQ unbound identifier", fn() -> Dxuq4.lookup(:y, env) end)
+    env = Dxuq4.extendEnv(:y, %NumV{val: 21}, env)
+    assert Dxuq4.lookup(:y, env).val == 21
+
+  end
+
+  test "test extendAllEnv" do
+    env = Dxuq4.extendAllEnv([], [], [])
+    assert env == []
+    env = Dxuq4.extendAllEnv([:x, :y], [%NumV{val: 1}, %NumV{val: 2}], [])
+    assert Dxuq4.lookup(:x, env).val == 1
+    assert Dxuq4.lookup(:y, env).val == 2
   end
 
 end
