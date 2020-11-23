@@ -4,21 +4,28 @@ defmodule InterpreterTest do
 
   import Dxuq4
 
-  alias Dxuq4.{NumC, IdC, AppC, Binding, NumV, PrimV}
+  alias Dxuq4.{NumC, IdC, AppC, LamC, IfC, StringC, Binding, NumV, PrimV, BoolV, StringV}
 
   #-----------------------------------------------------------
   #Top Environment
 
   @topEnv [
-    %{id: :+, val: %PrimV{pfun: &Dxuq4.add/1}}
-    %{id: :-, val: %PrimV{pfun: &Dxuq4.subtract/1}}
-    %{id: :*, val: %PrimV{pfun: &Dxuq4.multiply/1}}
-    %{id: :/, val: %PrimV{pfun: &Dxuq4.divide/1}}
+    %{id: :+, val: %PrimV{pfun: &Dxuq4.add/1}},
+    %{id: :-, val: %PrimV{pfun: &Dxuq4.subtract/1}},
+    %{id: :*, val: %PrimV{pfun: &Dxuq4.multiply/1}},
+    %{id: :/, val: %PrimV{pfun: &Dxuq4.divide/1}},
+    %{id: :true, val: %BoolV{bool: true}},
+    %{id: :false, val: %BoolV{bool: false}}
   ]
 
   test "test interp with NumC" do
     expr = %NumC{val: 127}
     assert Dxuq4.interp(expr, []) == %NumV{val: 127}
+  end
+
+  test "test interp with StringC" do
+    expr = %StringC{str: "hello!"}
+    assert Dxuq4.interp(expr, []) == %StringV{str: "hello!"}
   end
 
   test "test interp with IdC" do
@@ -34,6 +41,25 @@ defmodule InterpreterTest do
     assert interp(%AppC{fun: %IdC{id: :-}, args: [%NumC{val: 20}, %NumC{val: 10}]}, @topEnv) == %NumV{val: 10}
     assert interp(%AppC{fun: %IdC{id: :*}, args: [%NumC{val: 20}, %NumC{val: 10}]}, @topEnv) == %NumV{val: 200}
     assert interp(%AppC{fun: %IdC{id: :/}, args: [%NumC{val: 20}, %NumC{val: 10}]}, @topEnv) == %NumV{val: 2}
+  end
+
+  test "test interp if statements" do
+    assert interp(
+      %IfC{test: %IdC{id: :true}, then: %NumC{val: 5}, el: %NumC{val: 10}}, @topEnv
+    ) == %NumV{val: 5}
+    assert interp(
+      %IfC{test: %IdC{id: :false}, then: %NumC{val: 5}, el: %NumC{val: 10}}, @topEnv
+    ) == %NumV{val: 10}
+  end
+
+  test "test interp with closures" do
+    assert interp(
+      %AppC{
+        fun:
+          %LamC{params: [:x], body: %AppC{fun: %IdC{id: :+}, args: [%IdC{id: :x}, %NumC{val: 1}]}},
+        args:
+          [%NumC{val: 100}]},
+    @topEnv) == %NumV{val: 101}
   end
 
   test "test environment lookup" do

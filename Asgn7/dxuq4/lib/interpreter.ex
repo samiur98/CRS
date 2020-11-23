@@ -5,9 +5,9 @@ defmodule Dxuq4 do
 
   alias Dxuq4.{NumC, IdC, AppC, Binding, NumV}
 
-  @type exprC :: NumC.t() | IdC.t() | AppC.t()
+  @type exprC :: NumC.t() | IdC.t() | AppC.t() | LamC.t() | IfC.t() | StringC.t()
   @type environment :: list(Binding.t)
-  @type value :: NumV.t | PrimV.t
+  @type value :: NumV.t | PrimV.t | CloV.t | BoolV.t | StringV.t
 
   defmodule NumC do
     defstruct val:
@@ -17,6 +17,21 @@ defmodule Dxuq4 do
   defmodule IdC do
     defstruct id:
     @type t :: %IdC{id: atom}
+  end
+
+  defmodule StringC do
+    defstruct str:
+    @type t :: %StringC{str: String.t}
+  end
+
+  defmodule LamC do
+    defstruct [:params, :body]
+    @type t :: %LamC{params: list(:atom), body: Dxuq4.exprC}
+  end
+
+  defmodule IfC do
+    defstruct [:test, :then, :el]
+    @type t :: %IfC{test: Dxuq4.exprC, then: Dxuq4.exprC, el: Dxuq4.exprC}
   end
 
   defmodule AppC do
@@ -34,9 +49,24 @@ defmodule Dxuq4 do
     @type t :: %NumV{val: float}
   end
 
+  defmodule BoolV do
+    defstruct bool:
+    @type t :: %BoolV{bool: boolean}
+  end
+
+  defmodule StringV do
+    defstruct str:
+    @type t :: %StringV{str: String.t}
+  end
+
   defmodule PrimV do
     defstruct pfun:
     @type t :: %PrimV{pfun: (list(Dxuq4.value) -> Dxuq4.value)}
+  end
+
+  defmodule CloV do
+    defstruct [:params, :body, :cloEnv]
+    @type t :: %CloV{params: list(atom), body: Dxuq4.exprC, cloEnv: Dxuq4.environment}
   end
 
 
@@ -53,24 +83,48 @@ defmodule Dxuq4 do
       %IdC{id: id} ->
         lookup(id, env)
 
+      %StringC{str: str} ->
+        %StringV{str: str}
+
+      %LamC{params: params, body: body} ->
+        %CloV{params: params, body: body, cloEnv: env}
+
+      %IfC{test: test, then: then, el: el} ->
+
+        case interp(test, env) do
+          %BoolV{bool: true} -> interp(then, env)
+          %BoolV{bool: false} -> interp(el, env)
+        end
+
       %AppC{fun: fun, args: args} ->
 
+        #evaluate expression that should return a function value
         fun_val = interp(fun, env)
 
         case fun_val do
 
-          %{pfun: pfun} ->
-
+          %PrimV{pfun: pfun} ->
             pfun.(Enum.map(args, fn a -> interp(a, env) end))
+
+          %CloV{params: params, body: body, cloEnv: cloEnv} ->
+
+            #check number of arguments matches number of parameters
+            if length(params) != length(args) do
+                raise "DXUQ incorrect number of args passed to function"
+            end
+
+            #evaluate arguments -- eager
+            arg_vals = Enum.map(args, fn a -> interp(a, env) end)
+
+            #extend cloEnv with parameters
+            new_env = extendAllEnv(params, arg_vals, cloEnv)
+
+            #evaluate function body with new env
+            interp(body, new_env)
 
           _ ->
             raise "DXUQ invalid function call"
-
         end
-
-      _ ->
-        nil
-
     end
   end
 
